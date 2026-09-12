@@ -1,0 +1,39 @@
+{
+  "id": "ans_02",
+  "object": "chat.completion",
+  "created": 1756579200,
+  "model": "brave-pro",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Grounded answer with citations."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "citations": [
+    {
+      "start_index": 0,
+      "end_index": 12,
+      "number": 1,
+      "url": "https://search.brave.com/",
+      "favicon": "https://search.brave.com/favicon.ico",
+      "snippet": "an independent index"
+    },
+    {
+      "number": 2,
+      "url": "https://brave.com"
+    },
+    "not an object",
+    {
+      "url": 42
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 900,
+    "completion_tokens": 120,
+    "total_tokens": 1020
+  }
+}

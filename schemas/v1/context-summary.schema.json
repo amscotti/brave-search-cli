@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/context-summary.schema.json",
+  "title": "context summary record (v1)",
+  "description": "The terminal record of a successful non-streaming LLM context retrieval: the two stable counts the documented response shape provides — usable grounding.generic passages and sources map entries — the exchange status, and the request identifiers the response offered. The response documents no token estimate, so none is projected. Rate-limit windows and usage stay in the JSON envelope's meta, not in JSONL records.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "summary"
+    },
+    "command": {
+      "const": "context"
+    },
+    "snippet_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 599
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["schema_version", "type", "command", "snippet_count", "source_count", "http_status"],
+  "additionalProperties": false
+}

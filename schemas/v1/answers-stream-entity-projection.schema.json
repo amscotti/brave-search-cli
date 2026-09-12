@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-entity-projection.schema.json",
+  "title": "answers stream entity projection (v1)",
+  "description": "One entity of a streamed answers run inside the buffered JSON envelope's projection: the projected text members of the entity tag's payload, each present only when offered.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "entity_type": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+Usage: brave-search config repair-permissions [-hV] [--no-color] [--quiet]
+       [--verbose]
+Reset the credential file and its directory to owner-only permissions.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.

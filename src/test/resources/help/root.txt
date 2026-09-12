@@ -1,0 +1,21 @@
+Usage: brave-search [-hV] [--no-color] [--quiet] [--verbose] [COMMAND]
+Brave Search command line client for humans and autonomous agents.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.
+Commands:
+  version     Print version information to stdout and exit.
+  config      Manage the local Brave credential configuration.
+  web         Search the web with one query and print the results.
+  context     Retrieve LLM-ready search context for one query.
+  news        Search news with one query and print the results.
+  videos      Search videos with one query and print the results.
+  images      Search images with one query and print the results.
+  suggest     Suggest query completions for one partial query.
+  spellcheck  Spell-check one query and print the corrections.
+  places      Search local places: points of interest, cities, and addresses.
+  rich        Fetch the current rich results of one web search callback key.
+  answers     Ask one question and print the completed grounded answer.
+  completion  Print a shell completion script for bash or zsh to stdout.

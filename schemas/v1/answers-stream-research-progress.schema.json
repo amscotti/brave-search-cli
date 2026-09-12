@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-research-progress.schema.json",
+  "title": "answers stream research_progress record (v1)",
+  "description": "One research-family event of a streamed answers run — a queries, analyzing, thinking, progress, or blindspots tag — carrying the tag that closed beside its parsed JSON payload.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "research_progress"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "tag": {
+      "enum": ["queries", "analyzing", "thinking", "progress", "blindspots"]
+    },
+    "payload": {
+      "$comment": "The tag's validated JSON payload, carried as parsed. The decoder guarantees exactly one valid JSON document; the upstream contract leaves research-tag shapes unverified, so any JSON value rides here, not only an object."
+    }
+  },
+  "required": ["schema_version", "type", "command", "tag", "payload"],
+  "additionalProperties": false
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/places-describe-summary.schema.json",
+  "title": "places describe summary record (v1)",
+  "description": "The terminal summary record of one completed places describe walk: the invocation's id count, the returned and missing position counts of the order reconstruction, and the chunk request counts beside the latest response's identifiers. It follows the streamed per-id result records of every completed chunk.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "summary"
+    },
+    "command": {
+      "const": "places.describe"
+    },
+    "id_count": {
+      "$comment": "The number of ids the invocation asked about, duplicates included.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200
+    },
+    "returned_count": {
+      "$comment": "The input positions whose id the responses carried.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 200
+    },
+    "missing_count": {
+      "$comment": "The input positions rendered as placeholders — missing or expired ids.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 200
+    },
+    "requested_requests": {
+      "$comment": "The chunk request count the invocation fans out into: the ceiling of id count over twenty.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "received_requests": {
+      "$comment": "The chunk requests that completed.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 599
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["schema_version", "type", "command", "id_count", "returned_count", "missing_count", "requested_requests", "received_requests", "http_status"],
+  "additionalProperties": false
+}

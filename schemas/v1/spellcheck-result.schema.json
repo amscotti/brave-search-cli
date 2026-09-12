@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/spellcheck-result.schema.json",
+  "title": "spellcheck result record (v1)",
+  "description": "One logical spellcheck correction as one JSONL result record: the original zero-based position in the upstream results array, the constant spellcheck bucket, and the spellcheck-corrected query — the only member the upstream reference documents for a spellcheck result.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "spellcheck"
+    },
+    "bucket": {
+      "const": "spellcheck"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "query": {
+      "$comment": "The spellcheck-corrected query.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position", "query"],
+  "additionalProperties": false
+}

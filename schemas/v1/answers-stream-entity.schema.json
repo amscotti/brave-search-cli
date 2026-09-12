@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-entity.schema.json",
+  "title": "answers stream entity record (v1)",
+  "description": "One entity of a streamed answers run, carried when its entity tag closes: the projected text members of the tag's JSON payload, each present only when the payload offered it.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "entity"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "name": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "entity_type": {
+      "$comment": "The entity's kind as the payload spelled it; it lands under this name because the record's framing already owns the type member as the record discriminator.",
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command"],
+  "additionalProperties": false
+}

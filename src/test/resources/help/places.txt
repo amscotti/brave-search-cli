@@ -1,0 +1,13 @@
+Usage: brave-search places [-hV] [--no-color] [--quiet] [--verbose] [COMMAND]
+Search local places: points of interest, cities, and addresses.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.
+Commands:
+  search    Search places with an optional query, an anchor, or neither of the
+              two.
+  details   Fetch photos, web mentions, and profiles of places by their opaque
+              ids.
+  describe  Fetch the AI-generated descriptions of places by their opaque ids.

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/places-details-result.schema.json",
+  "title": "places details result record (v1)",
+  "description": "One requested POI id of a places details invocation as one JSONL result record, at its original zero-based input position: present true with the usable textual members the returned detail entry carried, or present false as the placeholder of a missing or expired id. A duplicate input id renders again at each of its positions. Absent members are omitted, never emitted as null; the rich nested structures of the detail response stay with the lossless data.upstream array of the JSON envelope.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "places.details"
+    },
+    "position": {
+      "$comment": "The original zero-based position of the id in the invocation's input order.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "bucket": {
+      "const": "details"
+    },
+    "id": {
+      "$comment": "The opaque, ephemeral upstream POI id exactly as the caller supplied it; never validated for internal format.",
+      "type": "string"
+    },
+    "present": {
+      "$comment": "Whether the chunk's response carried an entry matching this position's id.",
+      "type": "boolean"
+    },
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "display_address": {
+      "$comment": "The display address of the entry's postal address block.",
+      "type": "string"
+    },
+    "phone": {
+      "$comment": "The telephone of the entry's contact block.",
+      "type": "string"
+    },
+    "email": {
+      "$comment": "The email of the entry's contact block.",
+      "type": "string"
+    },
+    "price_range": {
+      "type": "string"
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "thumbnail": {
+      "$comment": "The source url of the entry's thumbnail block.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "position", "bucket", "id", "present"],
+  "additionalProperties": false
+}

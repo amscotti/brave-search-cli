@@ -1,0 +1,39 @@
+{
+  "query": {
+    "original": "three word query"
+  },
+  "grounding": {
+    "generic": [
+      {
+        "text": "First context passage about the query subject."
+      },
+      {
+        "text": "Second passage, déjà vu, with an emoji ☕."
+      },
+      {
+        "score_only": {
+          "rank": 0.125
+        }
+      }
+    ],
+    "map": [
+      {
+        "id": "map/first",
+        "name": "Around Here"
+      }
+    ]
+  },
+  "sources": {
+    "https://example.com/first": {
+      "title": "First Source",
+      "site_name": "example.com"
+    },
+    "https://example.org/second": {
+      "title": "Second Source"
+    }
+  },
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

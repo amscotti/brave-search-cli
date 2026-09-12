@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/rich-result.schema.json",
+  "title": "rich result record (v1)",
+  "description": "One vertical block of a rich callback response as one JSONL result record: the vertical's own upstream member name as its bucket, the vertical's zero-based ordinal among the response's vertical blocks, and its whole item count. The record is deliberately per block, not per item, because the upstream response shape is undocumented: the vertical block is the largest unit this CLI can name without modeling internals it cannot verify, and the lossless items stay in the JSON envelope's data.upstream.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "rich"
+    },
+    "bucket": {
+      "$comment": "The vertical block's own upstream member name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "position": {
+      "$comment": "The vertical's zero-based ordinal among the response's vertical blocks, in document order.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "item_count": {
+      "$comment": "The vertical block's whole array size, counting non-object elements too.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position", "item_count"],
+  "additionalProperties": false
+}

@@ -1,0 +1,90 @@
+Usage: brave-search web [-hV] [--all-pages] [--[no-]enable-rich-callback] [--
+                        [no-]extra-snippets] [--[no-]include-fetch-metadata]
+                        [--no-color] [--[no-]operators] [--pretty] [--quiet] [--
+                        [no-]spellcheck] [--[no-]text-decorations] [--verbose]
+                        [--api-version=<apiVersion>]
+                        [--connect-timeout=<connectTimeout>] [--count=<n>]
+                        [--country=<code>] [--freshness=<freshness>]
+                        [--loc-city=<text>] [--loc-country=<code>]
+                        [--loc-lat=<decimal>] [--loc-long=<decimal>]
+                        [--loc-postal-code=<text>] [--loc-state=<code>]
+                        [--loc-state-name=<text>] [--loc-timezone=<IANA-zone>]
+                        [--max-pages=<1..10>] [-o=<output>] [--page=<1..10>]
+                        [--safe-search=<safeSearch>] [--search-lang=<tag>]
+                        [--timeout=<totalTimeout>] [--ui-lang=<tag>]
+                        [--units=<units>] [--exclude-site=<domain>]...
+                        [--goggle=<url-or-inline>]... [--goggle-file=<path>]...
+                        [--include-site=<domain>]... [--result-filter=<filter>[,
+                        <filter>...]]... QUERY
+Search the web with one query and print the results.
+      QUERY                  One search query; quote it and use -- when it
+                               starts like an option.
+      --all-pages            Request the pages sequentially, up to the bound,
+                               and aggregate them.
+      --api-version=<apiVersion>
+                             Pin the Api-Version header to a real calendar
+                               date, YYYY-MM-DD.
+      --connect-timeout=<connectTimeout>
+                             Client connection timeout, for example 10s;
+                               default 10s.
+      --count=<n>            Result count within the endpoint's documented
+                               range.
+      --country=<code>       Two-letter result country code.
+      --[no-]enable-rich-callback
+                             Request the rich callback result block.
+      --exclude-site=<domain>
+                             Compile an exclude-site rule for one IDNA domain;
+                               repeatable, mixes with --include-site.
+      --[no-]extra-snippets  Request additional result snippets.
+      --freshness=<freshness>
+                             pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD.
+      --goggle=<url-or-inline>
+                             Goggle as an absolute http(s) URL or an inline
+                               definition; repeatable, at most 3.
+      --goggle-file=<path>   Goggle read from a regular UTF-8 file of at most 2
+                               MiB; repeatable, at most 3.
+  -h, --help                 Show this help message and exit.
+      --[no-]include-fetch-metadata
+                             Include page fetch metadata.
+      --include-site=<domain>
+                             Compile an include-site rule for one IDNA domain;
+                               repeatable, mixes with --exclude-site.
+      --loc-city=<text>      Location city name.
+      --loc-country=<code>   Location country, two uppercase letters.
+      --loc-lat=<decimal>    Location latitude, -90 to 90; pairs with
+                               --loc-long.
+      --loc-long=<decimal>   Location longitude, -180 to 180; pairs with
+                               --loc-lat.
+      --loc-postal-code=<text>
+                             Location postal code.
+      --loc-state=<code>     Location state, two uppercase letters.
+      --loc-state-name=<text>
+                             Location state full name.
+      --loc-timezone=<IANA-zone>
+                             Location IANA timezone.
+      --max-pages=<1..10>    The page budget of --all-pages; the default is the
+                               documented maximum of 10.
+      --no-color             Disable ANSI color unconditionally; NO_COLOR
+                               disables it too.
+  -o, --output=<output>      Output channel: human, json, jsonl, or raw.
+      --[no-]operators       Disable query operators; on by default upstream.
+      --page=<1..10>         User-facing page; sent as its zero-based offset.
+      --pretty               Pretty-print JSON; invalid with jsonl and raw.
+      --quiet                Suppress optional diagnostics, never errors.
+      --result-filter=<filter>[,<filter>...]
+                             Result type filter; repeatable, also
+                               comma-separated.
+      --safe-search=<safeSearch>
+                             off, moderate, or strict.
+      --search-lang=<tag>    Result language tag.
+      --[no-]spellcheck      Ask upstream to correct the query spelling.
+      --[no-]text-decorations
+                             Bold rendering decorations in result text.
+      --timeout=<totalTimeout>
+                             Total non-stream request timeout, for example 30s;
+                               default 30s.
+      --ui-lang=<tag>        Interface language tag.
+      --units=<units>        metric or imperial.
+  -V, --version              Print version information to stdout and exit.
+      --verbose              Print diagnostics and resolved non-secret metadata
+                               to stderr.

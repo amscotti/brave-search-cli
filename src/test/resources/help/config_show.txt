@@ -1,0 +1,11 @@
+Usage: brave-search config show [-hV] [--no-color] [--quiet] [--verbose]
+                                [--output=MODE]
+Print the effective credential source and config-file state.
+  -h, --help          Show this help message and exit.
+      --no-color      Disable ANSI color unconditionally; NO_COLOR disables it
+                        too.
+      --output=MODE   Output channel: human, or one json machine record.
+      --quiet         Suppress optional diagnostics, never errors.
+  -V, --version       Print version information to stdout and exit.
+      --verbose       Print diagnostics and resolved non-secret metadata to
+                        stderr.

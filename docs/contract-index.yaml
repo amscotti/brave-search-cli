@@ -1,0 +1,513 @@
+# Stable requirement identifiers of the CLI contract: each maps to its normative section in
+# docs/cli-contract.md, docs/config-security.md, docs/brave-api-contract.md, or
+# docs/release.md and to one executable test that pins it. Verified by
+# io.amscotti.bravesearch.docs.ContractIndexTest.
+#
+# The pinning tests are the JVM process tests cited below. The native smoke suite
+# (src/nativeSmokeTest) runs the agreeing subset of the same scenarios against the native
+# executable — a source-set limitation of that suite, not a narrower contract.
+EXIT-CODE-TABLE:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.adapter.cli.exit.ExitCodeMapperTest#exitCodeTableCoversEveryFailureKind
+EXIT-PRECEDENCE:
+  doc: docs/cli-contract.md#failure-precedence
+  test: io.amscotti.bravesearch.adapter.cli.command.SingleRequestSignalExitTest#aFailedExchangeUnderALatchedInterruptExits130
+HTTP-STATUS-CLASSIFICATION:
+  doc: docs/cli-contract.md#upstream-status-classification
+  test: io.amscotti.bravesearch.domain.error.HttpFailureClassificationTest#statusAloneClassifiesUpstreamFailures
+OUTPUT-MODE-GRAMMAR:
+  doc: docs/cli-contract.md#output-modes
+  test: io.amscotti.bravesearch.adapter.cli.option.OutputModeConverterTest#rejectsEveryOtherSpelling
+CLI-GLOBAL-PLACEMENT:
+  doc: docs/cli-contract.md#global-and-remote-options
+  test: io.amscotti.bravesearch.adapter.cli.option.GlobalOptionsTest#globalsParseBeforeTheSubcommandTokenIntoTheSharedInstance
+CLI-GLOBAL-VERBOSE-QUIET:
+  doc: docs/cli-contract.md#global-and-remote-options
+  test: io.amscotti.bravesearch.adapter.cli.option.GlobalOptionsTest#verboseAndQuietAreMutuallyExclusiveInBothOrders
+CLI-STRICT-PARSING:
+  doc: docs/cli-contract.md#strict-parsing
+  test: io.amscotti.bravesearch.adapter.cli.option.StrictOptionParsingTest#abbreviatedLongOptionsAreRejectedNotCompleted
+CLI-DURATION-GRAMMAR:
+  doc: docs/cli-contract.md#duration-options
+  test: io.amscotti.bravesearch.adapter.cli.option.SimpleDurationConverterTest#acceptsUnsignedIntegersWithMsSMAndMUnitsOnly
+CLI-TIMEOUT-DEFAULTS:
+  doc: docs/cli-contract.md#duration-options
+  test: io.amscotti.bravesearch.adapter.cli.option.RemoteOptionsTest#defaultsHoldTheDocumentedRemoteBudgetsAndChannels
+CLI-API-VERSION-PIN:
+  doc: docs/cli-contract.md#api-version-pin
+  test: io.amscotti.bravesearch.adapter.cli.option.ApiVersionConverterTest#impossibleAndMalformedDatesAreTypedUsageFailures
+MODE-COMPAT-PRETTY:
+  doc: docs/cli-contract.md#output-mode-compatibility
+  test: io.amscotti.bravesearch.adapter.cli.option.OutputModeCompatibilityTest#prettyIsRejectedWithJsonlAndRaw
+MODE-COMPAT-LOCAL:
+  doc: docs/cli-contract.md#output-mode-compatibility
+  test: io.amscotti.bravesearch.adapter.cli.option.OutputModeCompatibilityTest#localCommandsRejectOutputAndPretty
+MODE-COMPAT-RAW-SINGLE:
+  doc: docs/cli-contract.md#output-mode-compatibility
+  test: io.amscotti.bravesearch.adapter.cli.option.OutputModeCompatibilityTest#rawIsRejectedForMultiRequestOperations
+PARSE-BEFORE-RENDER:
+  doc: docs/cli-contract.md#parse-before-render
+  test: io.amscotti.bravesearch.domain.output.ModeGateTest#failuresBeforeModeParsingStayOnHumanDiagnostics
+WARNINGS-ROUTING:
+  doc: docs/cli-contract.md#warning-routing
+  test: io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarningsTest#warningsRouteToTheChannelTheirModeOwns
+ENVELOPE-SUCCESS:
+  doc: docs/cli-contract.md#machine-envelope
+  test: io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodecGoldenTest#successEnvelopeWithFullMetaMatchesGoldenBytes
+ENVELOPE-ERROR:
+  doc: docs/cli-contract.md#machine-envelope
+  test: io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodecGoldenTest#failureEnvelopeWithRateLimitsMatchesGoldenBytes
+JSONL-FRAMING:
+  doc: docs/cli-contract.md#jsonl-framing
+  test: io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodecGoldenTest#resultAndSummaryLinesMatchGoldenBytes
+RAW-BYTES:
+  doc: docs/cli-contract.md#raw-output
+  test: io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodecTest#passthroughIsByteIdenticalToTheDecodedBody
+CONFIG-PRECEDENCE:
+  doc: docs/config-security.md#credential-precedence
+  test: io.amscotti.bravesearch.adapter.config.CredentialResolverTest#canonicalVariableOutranksAliasAndFile
+CONFIG-PATHS:
+  doc: docs/config-security.md#credential-file-paths
+  test: io.amscotti.bravesearch.adapter.config.ConfigPathsTest#macOsResolvesTheNativeApplicationSupportPathAndIgnoresXdg
+CONFIG-SECURE-WRITE:
+  doc: docs/config-security.md#secure-write-algorithm
+  test: io.amscotti.bravesearch.adapter.config.SecureConfigStoreWriteTest#storeAtomicallyReplacesAnExistingConfig
+CONFIG-REFUSALS:
+  doc: docs/config-security.md#refusal-conditions
+  test: io.amscotti.bravesearch.adapter.config.SecureConfigStoreWriteTest#storeRefusesASymlinkedDestinationAndLeavesTheTargetUntouched
+CONFIG-SHOW-REDACTION:
+  doc: docs/config-security.md#config-show-redaction
+  test: io.amscotti.bravesearch.adapter.cli.command.config.ConfigProcessTest#setKeyStdinWritesAnOwnerOnlyFileAndShowReportsTheFileSource
+CONFIG-SHOW-JSON:
+  doc: docs/cli-contract.md#output-mode-compatibility
+  test: io.amscotti.bravesearch.adapter.cli.command.config.ConfigProcessTest#showOutputJsonEmitsOneMachineRecordAndRejectsTheLineChannels
+CONFIG-STDIN-CONTRACT:
+  doc: docs/config-security.md#secret-input-rules
+  test: io.amscotti.bravesearch.adapter.config.SecretInputTest#stdinAcceptsCrlfAndStripsOnlyTheTerminator
+CONFIG-EXIT-3:
+  doc: docs/config-security.md#exit-3-conditions
+  test: io.amscotti.bravesearch.adapter.cli.command.config.ConfigProcessTest#setKeyWithoutAConsoleAndWithoutStdinExitsThree
+API-BASE-PROTOCOL:
+  doc: docs/brave-api-contract.md#base-protocol
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransportTest#sendsTheComposedHeadersWithExactValuesOnTheWire
+API-ORIGIN-LOOPBACK:
+  doc: docs/brave-api-contract.md#origin-and-loopback-credential-routing
+  test: io.amscotti.bravesearch.application.exchange.BraveApiOriginTest#storedCredentialsRouteOnlyToTheProductionOrigin
+API-REQUEST-ENCODING:
+  doc: docs/brave-api-contract.md#request-building
+  test: io.amscotti.bravesearch.adapter.bravehttp.RequestUriBuilderTest#encodesEveryKeyAndValueIndependentlyAndStrictly
+API-RESPONSE-BOUNDS:
+  doc: docs/brave-api-contract.md#response-bounds
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpContractLoopbackTest#cancelsAnOversizedIdentityBodyWithNoPartialOutput
+API-CONTENT-TYPE:
+  doc: docs/brave-api-contract.md#content-type-enforcement
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpContractLoopbackTest#rejectsAWrongContentTypeWithABoundedRedactedPreview
+API-GZIP:
+  doc: docs/brave-api-contract.md#gzip-content-coding
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpContractLoopbackTest#decodesAGzipSuccessBodyByteExact
+API-ERROR-CLASSIFICATION:
+  doc: docs/brave-api-contract.md#error-decoding-and-classification
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpContractLoopbackTest#classifiesUpstreamStatusesAndPreservesStructuredErrors
+API-SENTINEL-FREE-DIAGNOSTICS:
+  doc: docs/brave-api-contract.md#sentinel-free-diagnostics
+  test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpContractLoopbackTest#failureDiagnosticsNeverCarryTheSentinelOrItsQueryText
+META-RATE-WINDOWS:
+  doc: docs/brave-api-contract.md#rate-limits-and-usage
+  test: io.amscotti.bravesearch.adapter.bravehttp.metadata.RateLimitHeaderParserTest#threeCommaAlignedWindowsParsePositionally
+META-RATE-MISMATCH-NONFATAL:
+  doc: docs/brave-api-contract.md#rate-limits-and-usage
+  test: io.amscotti.bravesearch.adapter.bravehttp.metadata.RateLimitHeaderParserTest#misalignedCommaListsKeepAlignedWindowsAndDropGapsWithoutShifting
+META-RESET-DURATION:
+  doc: docs/brave-api-contract.md#rate-limits-and-usage
+  test: io.amscotti.bravesearch.adapter.bravehttp.metadata.RateLimitHeaderParserTest#resetAtIsDerivedPerWindowAgainstTheObservedInstant
+META-ANSWERS-USAGE:
+  doc: docs/brave-api-contract.md#rate-limits-and-usage
+  test: io.amscotti.bravesearch.adapter.bravehttp.metadata.AnswersUsageParserTest#knownCountersAndCostsParseWithExactScale
+META-UNKNOWN-PRESERVED:
+  doc: docs/brave-api-contract.md#rate-limits-and-usage
+  test: io.amscotti.bravesearch.adapter.bravehttp.metadata.AnswersUsageParserTest#unknownRequestHeaderNamesArePreservedVerbatimInFirstSeenOrder
+SSE-LINE-ENDINGS:
+  doc: docs/brave-api-contract.md#server-sent-event-transport
+  test: io.amscotti.bravesearch.adapter.bravehttp.sse.SseEventParserTest#lineEndingMatrixReplaysIdenticallyAtEveryChunkSplit
+SSE-DATA-JOINING:
+  doc: docs/brave-api-contract.md#server-sent-event-transport
+  test: io.amscotti.bravesearch.adapter.bravehttp.sse.SseEventParserTest#repeatedDataLinesJoinWithNewlineExactly
+SSE-BOUNDS:
+  doc: docs/brave-api-contract.md#server-sent-event-transport
+  test: io.amscotti.bravesearch.adapter.bravehttp.sse.SseEventParserTest#lineAndEventBoundsBreachWithTypedOverflowAndCancellation
+SSE-UTF8-SPLIT:
+  doc: docs/brave-api-contract.md#server-sent-event-transport
+  test: io.amscotti.bravesearch.adapter.bravehttp.sse.SseEventParserTest#multibyteCharactersSplitAtEveryBoundaryReplayIdentically
+SSE-EOF-DONE:
+  doc: docs/brave-api-contract.md#server-sent-event-transport
+  test: io.amscotti.bravesearch.adapter.bravehttp.sse.SseEventParserTest#eofAndTerminalMarkerMatrixBehavesDeterministically
+TAG-DECODER-SPLIT:
+  doc: docs/brave-api-contract.md#answers-stream-tag-decoding
+  test: io.amscotti.bravesearch.adapter.bravehttp.json.AnswerTagDecoderTest#tagsSplitAcrossChunksAndMidPayloadStillDecode
+TAG-UNKNOWN-PRESERVED:
+  doc: docs/brave-api-contract.md#answers-stream-tag-decoding
+  test: io.amscotti.bravesearch.adapter.bravehttp.json.AnswerTagDecoderTest#unknownTagsSurfaceWithNameAndRawPayloadText
+TAG-TEXT-EXACT:
+  doc: docs/brave-api-contract.md#answers-stream-tag-decoding
+  test: io.amscotti.bravesearch.adapter.bravehttp.json.AnswerTagDecoderTest#ordinaryTextIsPreservedExactlyAroundTags
+WEB-WIRE:
+  doc: docs/brave-api-contract.md#goggles-and-the-post-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.WebSearchEndpointTest#fullParameterRequestRendersTheExactEncodedUriAndHeaderAssembly
+WEB-OPTIONS:
+  doc: docs/cli-contract.md#web-command
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchCommandTest#dispatchesTheFullyMappedRequestAndOmitsEveryUnsuppliedBoolean
+WEB-HUMAN-OUTPUT:
+  doc: docs/cli-contract.md#human-rendering
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#humanHappyPathRendersNumberedLfLinesWithoutAnsi
+WEB-JSON-ENVELOPE:
+  doc: docs/cli-contract.md#machine-envelope
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#jsonSuccessEnvelopeIsOneValidatedLfLine
+WEB-JSONL-RECORDS:
+  doc: docs/cli-contract.md#jsonl-records
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+WEB-RAW-BYTES:
+  doc: docs/cli-contract.md#raw-output
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#rawOutputIsTheServedBodyBytesExactly
+WEB-AUTH-EXIT-4:
+  doc: docs/cli-contract.md#failure-rendering
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#authenticationFailureExitsFourInHumanAndJsonModes
+WEB-USAGE-PRE-DISPATCH:
+  doc: docs/cli-contract.md#parse-before-render
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#usageFailureHappensBeforeAnyNetworkDispatch
+WEB-LOOPBACK-TESTKEY:
+  doc: docs/brave-api-contract.md#origin-and-loopback-credential-routing
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#loopbackRunsSendTheTestKeyAndNeverStoredCredentials
+PAG-CONTINUATION:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.application.service.PaginationServiceTest#stopsAfterThePageThatReportsNoMoreResults
+PAG-DEDUP:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.domain.result.UrlDeduplicatorTest#overlappingPagesKeepFirstSeenOrderAndCountTheDuplicates
+PAG-PARTIAL-FAILURE:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.presentation.web.WebPagedSearchPresenterImplTest#bufferedModesEmitNoResultPayloadWhenALaterPageFails
+PAG-RATE-PACING:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.application.service.PaginationServiceTest#anExhaustedWindowPacesTheNextRequestUntilTheLatestExhaustedResetInstant
+WALK-EPIPE-SILENT-ZERO:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#pagedJsonlBrokenPipeMidWalkIsSilentZero
+PAG-RAW-REJECTED:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchCommandTest#allPagesRejectsRawOutputBeforeAnyDispatch
+PAG-UPSTREAM-ARRAY:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.presentation.json.MultiRequestCodecTest#multiRequestSuccessEncodesTheOrderedUpstreamEntryArray
+GOG-STRATEGY-EXCLUSIVE:
+  doc: docs/cli-contract.md#goggles-and-site-shortcuts
+  test: io.amscotti.bravesearch.adapter.cli.option.GoggleOptionsTest#theInputStrategiesAreMutuallyExclusive
+GOG-MAX-THREE:
+  doc: docs/cli-contract.md#goggles-and-site-shortcuts
+  test: io.amscotti.bravesearch.adapter.cli.option.GoggleOptionsTest#atMostThreeDirectGogglesAreAccepted
+GOG-SITE-INJECTION-SAFE:
+  doc: docs/cli-contract.md#goggles-and-site-shortcuts
+  test: io.amscotti.bravesearch.domain.goggles.GoggleCompilerTest#theSiteInjectionBatteryIsRejectedBeforeAnyCompilation
+GOG-FILE-BOUNDS:
+  doc: docs/cli-contract.md#goggles-and-site-shortcuts
+  test: io.amscotti.bravesearch.adapter.config.GoggleFileLoaderTest#aFileBeyondTheBoundIsRefusedWithPathAndSizeOnly
+GOG-CONTENT-REDACTED:
+  doc: docs/cli-contract.md#goggles-and-site-shortcuts
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchCommandTest#aFailingGoggleFileKeepsItsContentOutOfEveryDiagnostic
+GOG-GET-POST-EQUIVALENCE:
+  doc: docs/brave-api-contract.md#goggles-and-the-post-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.WebSearchEndpointTest#getAndPostSerializeEveryFieldEquivalently
+NEWS-WIRE:
+  doc: docs/brave-api-contract.md#news-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.NewsSearchEndpointTest#getAndPostSerializeEveryFieldEquivalently
+NEWS-BOUNDS:
+  doc: docs/cli-contract.md#news-command
+  test: io.amscotti.bravesearch.domain.request.NewsSearchRequestTest#acceptsTheDocumentedCountRangeAndRejectsBothEdgesBeyondIt
+NEWS-PAGE-TERMINATION:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#allPagesWalksExactlyTheTenDocumentedPages
+NEWS-DEDUP:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#pagedWalkDeduplicatesOverlappingResultsAcrossPages
+NEWS-PARTIAL-FAILURE:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#pagedJsonlKeepsPageOneRecordsBeforeTheLaterPageError
+NEWS-OUTPUT:
+  doc: docs/cli-contract.md#news-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+VID-WIRE:
+  doc: docs/brave-api-contract.md#videos-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.VideoSearchEndpointTest#getAndPostSerializeEveryFieldEquivalently
+VID-BOUNDS:
+  doc: docs/cli-contract.md#videos-command
+  test: io.amscotti.bravesearch.domain.request.VideoSearchRequestTest#acceptsTheDocumentedCountRangeAndRejectsBothEdgesBeyondIt
+VID-PAGE-TERMINATION:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.videos.VideoSearchProcessTest#allPagesWalksExactlyTheTenDocumentedPages
+VID-NO-GOGGLES:
+  doc: docs/cli-contract.md#videos-command
+  test: io.amscotti.bravesearch.adapter.cli.command.videos.VideoSearchCommandTest#goggleSpellingsAreUnknownOptionsOfTheVideosCommand
+VID-OUTPUT:
+  doc: docs/cli-contract.md#videos-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.videos.VideoSearchProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+IMG-WIRE:
+  doc: docs/brave-api-contract.md#images-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.ImageSearchEndpointTest#fullParameterRequestRendersTheExactEncodedUri
+IMG-COUNT-200:
+  doc: docs/cli-contract.md#images-command
+  test: io.amscotti.bravesearch.domain.request.ImageSearchRequestTest#acceptsTheDocumentedCountRangeAndRejectsBothEdgesBeyondIt
+IMG-SAFESEARCH-OFF-STRICT:
+  doc: docs/cli-contract.md#images-command
+  test: io.amscotti.bravesearch.adapter.cli.command.images.ImageSearchCommandTest#moderateSafeSearchIsRejectedBeforeAnyDispatch
+IMG-NO-PAGINATION:
+  doc: docs/cli-contract.md#images-command
+  test: io.amscotti.bravesearch.adapter.cli.command.images.ImageSearchCommandTest#paginationSpellingsAreRejectedBeforeAnyDispatch
+IMG-OUTPUT:
+  doc: docs/cli-contract.md#images-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.images.ImageSearchProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+SUG-WIRE:
+  doc: docs/brave-api-contract.md#suggest-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.SuggestEndpointTest#fullParameterRequestRendersTheExactEncodedUri
+SUG-LANG-MAPPING:
+  doc: docs/cli-contract.md#suggest-command
+  test: io.amscotti.bravesearch.adapter.cli.command.suggest.SuggestProcessTest#loopbackRunsSendTheTestKeyWithTheLanguageAliasOnTheSuggestWireName
+SUG-COUNT:
+  doc: docs/cli-contract.md#suggest-command
+  test: io.amscotti.bravesearch.domain.request.SuggestRequestTest#acceptsTheDocumentedCountRangeAndRejectsBothEdgesBeyondIt
+SUG-RICH:
+  doc: docs/cli-contract.md#suggest-command
+  test: io.amscotti.bravesearch.adapter.cli.command.suggest.SuggestCommandTest#theNegatableRichPairBindsFalseAndUnsuppliedStaysNull
+SUG-OUTPUT:
+  doc: docs/cli-contract.md#suggest-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.suggest.SuggestProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+SPL-WIRE:
+  doc: docs/brave-api-contract.md#spellcheck-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.SpellcheckEndpointTest#fullParameterRequestRendersTheExactEncodedUri
+SPL-LANG-MAPPING:
+  doc: docs/cli-contract.md#spellcheck-command
+  test: io.amscotti.bravesearch.adapter.cli.command.spellcheck.SpellcheckProcessTest#loopbackRunsSendTheTestKeyWithTheLanguageAliasOnTheSpellcheckWireName
+SPL-OUTPUT:
+  doc: docs/cli-contract.md#spellcheck-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.spellcheck.SpellcheckProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+PLACE-WIRE:
+  doc: docs/brave-api-contract.md#places-search-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceSearchEndpointTest#fullParameterRequestRendersTheExactEncodedUri
+PLACE-ANCHOR-RULES:
+  doc: docs/cli-contract.md#places-command
+  test: io.amscotti.bravesearch.domain.request.PlaceSearchRequestTest#theCoordinatePairRefusesTheLocationName
+PLACE-GEOLOC:
+  doc: docs/cli-contract.md#places-command
+  test: io.amscotti.bravesearch.domain.request.PlaceSearchRequestTest#geolocRangeChecksBothComponentsAndSerializesExactlyLatitudexLongitude
+PLACE-DECIMAL-BOUNDS:
+  doc: docs/cli-contract.md#places-command
+  test: io.amscotti.bravesearch.domain.request.PlaceSearchRequestTest#radiusRefusesExponentSpellingsAndUnboundedDigitCounts
+PLACE-COUNT-BUDGET:
+  doc: docs/cli-contract.md#places-command
+  test: io.amscotti.bravesearch.domain.request.PlaceSearchRequestTest#acceptsTheDocumentedCountRangeAndRejectsBothEdgesBeyondIt
+PLACE-HEADER-SAFETY:
+  doc: docs/cli-contract.md#places-command
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesSearchCommandTest#adversarialLocationStringsAreRejectedAtTheOptionBoundary
+PLACE-BUCKETS:
+  doc: docs/cli-contract.md#places-command-output
+  test: io.amscotti.bravesearch.adapter.cli.presentation.places.PlacesProjectionExtractorTest#enumeratesEveryDocumentedBucketInOrderWithPerEntryLabelsAndPositions
+PLACE-OUTPUT:
+  doc: docs/cli-contract.md#places-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesProcessTest#jsonlEmitsValidatedResultRecordsThenSummary
+PLACE-ENRICHMENT-WIRE:
+  doc: docs/brave-api-contract.md#place-enrichment-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceEnrichmentEndpointTest#detailIdsRideTheWireAsRepeatedParametersInInputOrder
+PLACE-DETAILS-CHUNKING:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#autoChunkingServesFortyFiveIdsAsThreeChunkRequests
+PLACE-DETAILS-PACING:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#chunkPacingWaitsBehindAnExhaustedWindow
+PLACE-DETAILS-ORDER-RECONSTRUCTION:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#duplicatesAndMissingIdsReconstructAtTheirOriginalPositions
+PLACE-DETAILS-PARTIAL-FAILURE:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#laterChunkFailureFollowsThePaginationPartialRules
+PLACE-DETAILS-CAP-200:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#invocationCapAcceptsTwoHundredAndRejectsTwoHundredAndOne
+PLACE-DETAILS-RAW-REJECTED:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#rawOutputIsRejectedBeforeAnyDispatch
+PLACE-DETAILS-OUTPUT:
+  doc: docs/cli-contract.md#places-details-and-describe-output
+  test: io.amscotti.bravesearch.adapter.cli.presentation.places.PlaceDetailsPresenterImplTest#jsonlStreamsPerIdRecordsInInputOrderAndEndsInOneCountedSummary
+PLACE-DESCRIBE-CHUNKING:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#describeAutoChunkingWalksItsOwnEndpointPath
+PLACE-DESCRIBE-ORDER-RECONSTRUCTION:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#describeDuplicatesAndMissingIdsReconstructAtTheirOriginalPositions
+PLACE-DESCRIBE-PARTIAL-FAILURE:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#describeLaterChunkFailureFollowsThePaginationPartialRules
+PLACE-DESCRIBE-CAP-200:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentCommandTest#describeInvocationCapIsRejectedBeforeAnyDispatch
+PLACE-DESCRIBE-RAW-REJECTED:
+  doc: docs/cli-contract.md#places-details-and-describe
+  test: io.amscotti.bravesearch.adapter.cli.command.places.PlacesEnrichmentProcessTest#describeRawOutputIsRejectedBeforeAnyDispatch
+PLACE-DESCRIBE-OUTPUT:
+  doc: docs/cli-contract.md#places-details-and-describe-output
+  test: io.amscotti.bravesearch.adapter.cli.presentation.places.PlaceDescribePresenterImplTest#jsonlRecordsCarryTheDescriptionBesideThePositionAndPresentMembers
+CTX-WIRE:
+  doc: docs/brave-api-contract.md#context-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.ContextEndpointTest#fullParameterRequestRendersTheExactEncodedUriAndHeaderAssembly
+CTX-BOUNDS:
+  doc: docs/cli-contract.md#llm-context-options
+  test: io.amscotti.bravesearch.domain.request.ContextRequestTest#everyNumericBoundIsEnforcedAtBothEdges
+CTX-THRESHOLD:
+  doc: docs/cli-contract.md#llm-context-options
+  test: io.amscotti.bravesearch.domain.request.ContextRequestTest#thresholdParsesExactlyTheFourDocumentedModes
+CTX-LOCATION-NO-TIMEZONE:
+  doc: docs/cli-contract.md#llm-context-options
+  test: io.amscotti.bravesearch.adapter.cli.command.context.ContextCommandTest#supplyingLocTimezoneIsAUsageErrorBeforeAnyDispatch
+CTX-OUTPUT:
+  doc: docs/cli-contract.md#context-command-output
+  test: io.amscotti.bravesearch.adapter.cli.presentation.context.ContextPresenterImplTest#jsonlModeWritesOneContextResultRecordThenTheSummary
+CTX-SINGLE-REQUEST:
+  doc: docs/cli-contract.md#context-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.context.ContextProcessTest#loopbackRunSendsTheTestKeyAndExactlyOneRequest
+RICH-WIRE-CALLBACK-KEY:
+  doc: docs/brave-api-contract.md#rich-callback-wire-form
+  test: io.amscotti.bravesearch.adapter.cli.command.rich.RichProcessTest#loopbackRunSendsTheCallbackKeyOnTheCallbackKeyWireNameNeverQueryQ
+RICH-LOSSLESS:
+  doc: docs/cli-contract.md#rich-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.rich.RichProcessTest#jsonEnvelopeIsOneValidatedLfLine
+RICH-HUMAN-VERTICALS:
+  doc: docs/cli-contract.md#rich-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.rich.RichProcessTest#humanHappyPathRendersPerVerticalSectionsWithoutAnsi
+RICH-ATTRIBUTION:
+  doc: docs/cli-contract.md#rich-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.rich.RichProcessTest#providerAttributionSurvivesHumanRenderingAndMachineLosslessness
+RICH-OUTPUT:
+  doc: docs/cli-contract.md#rich-command-output
+  test: io.amscotti.bravesearch.adapter.cli.command.rich.RichProcessTest#jsonlEmitsOneValidatedRecordPerVerticalThenSummary
+ANS-BODY-NESTED:
+  doc: docs/brave-api-contract.md#answers-wire-form
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#theBlockingRequestBodyTravelsNestedAndExact
+ANS-ONE-MESSAGE:
+  doc: docs/brave-api-contract.md#answers-wire-form
+  test: io.amscotti.bravesearch.adapter.bravehttp.endpoint.AnswersEndpointTest#exactlyOneUserMessageRidesEveryRequest
+ANS-RESEARCH-REQUIRES-STREAM:
+  doc: docs/cli-contract.md#answers-command
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersCommandTest#researchAndEnabledCitationsAndEntitiesAreRejectedOnBlockingRequests
+ANS-NO-STREAM-JSONL-INVALID:
+  doc: docs/cli-contract.md#answers-command
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersCommandTest#theJsonlChannelIsIncompatibleWithBlockingAnswers
+ANS-BLOCKING-OUTPUT:
+  doc: docs/cli-contract.md#answers-blocking-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#jsonEnvelopeIsOneValidatedLfLine
+ANS-USAGE-METADATA:
+  doc: docs/cli-contract.md#answers-blocking-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#humanHappyPathRendersTheAnswerAndUsageLineWithoutAnsi
+ANS-STREAM-MODES:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#theFullHappyStreamMatchesEveryModeContract
+ANS-STREAM-JSONL-EVENTS:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#theFullHappyStreamMatchesEveryModeContract
+ANS-STREAM-JSON-BUFFERED-ADVISORY:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#bufferedJsonStreamsOneEnvelopeWithTheAdvisory
+ANS-STREAM-RAW-SSE-BYTES:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#theFullHappyStreamMatchesEveryModeContract
+ANS-STREAM-SIGINT-130:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#interruptingMidStreamExitsOneThirtyWithPartialCounts
+ANS-STREAM-SIGTERM-143:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#terminatingMidStreamExitsOneFortyThreeWithTheTerminalRecord
+ANS-STREAM-EPIPE-0:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#closingTheDownstreamPipeMidStreamIsSilentZero
+ANS-STREAM-IDLE-WALL:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#anIdleStreamIsCutByItsDeadline
+ANS-STREAM-ABRUPT-EOF-COST-UNKNOWN:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#anAbruptEndWithoutUsageIsATransportFailureWithUnknownCost
+ANS-STREAM-INCREMENTAL:
+  doc: docs/cli-contract.md#answers-streaming-output
+  test: io.amscotti.bravesearch.adapter.cli.command.answers.AnswersProcessTest#streamedOutputPrecedesServerCompletionInEveryMode
+EXIT-INTERNAL-CATCHALL:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#anUnexpectedCrashInsideACommandExitsSeventyWithOneRedactedLine
+EXIT-INTERNAL-COMPOSITION:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#aCompositionDefectEndsAsTheInternalStatusWithOneRedactedLine
+EXIT-LOCAL-CONFIG-ESCAPE:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#anEscapedLocalConfigurationFailureKeepsTheConfigurationStatus
+VERSION-OUTPUT:
+  doc: docs/cli-contract.md#version-command
+  test: io.amscotti.bravesearch.bootstrap.MainTest#versionVariantsPrintIdenticalSingleLfTerminatedLine
+COMPLETION-SCRIPTS:
+  doc: docs/cli-contract.md#completion-command
+  test: io.amscotti.bravesearch.adapter.cli.command.completion.CompletionProcessTest#thePackagedScriptCopiesAreByteIdenticalToWholeProcessOutput
+COMPLETION-SHELL-VALIDATION:
+  doc: docs/cli-contract.md#completion-command
+  test: io.amscotti.bravesearch.adapter.cli.command.completion.CompletionProcessTest#thePrintedScriptsPassRealShellSyntaxChecks
+ANSI-ENABLE-CONSERVATIVE:
+  doc: docs/cli-contract.md#ansi-enablement
+  test: io.amscotti.bravesearch.adapter.cli.command.web.AnsiEnablementProcessTest#pipedRunWithColorfulTermStaysPlain
+ANSI-PTY-POSITIVE:
+  doc: docs/cli-contract.md#ansi-enablement
+  test: io.amscotti.bravesearch.adapter.cli.command.web.AnsiEnablementProcessTest#ptyRunEmitsTheBoldHeading
+HUMAN-LAYOUT:
+  doc: docs/cli-contract.md#human-output-layout
+  test: io.amscotti.bravesearch.adapter.cli.presentation.HumanListingTest#theTitleWrapsAtTheWidthMinusTheGutterWithContinuationsAlignedUnderIt
+HUMAN-WIDTH:
+  doc: docs/cli-contract.md#human-output-width
+  test: io.amscotti.bravesearch.adapter.cli.presentation.TerminalDetectorTest#anExportedSaneColumnsValueSuppliesTheRenderWidth
+HUMAN-STYLES:
+  doc: docs/cli-contract.md#human-output-styles
+  test: io.amscotti.bravesearch.adapter.cli.presentation.SgrStyleTest#boldWrapsTheTextInTheBoldIntensityEscapeWhenColorable
+QUOTA-FOOTER:
+  doc: docs/cli-contract.md#quota-footer
+  test: io.amscotti.bravesearch.adapter.cli.presentation.HumanListingTest#theQuotaFooterNamesTheMostRestrictiveNearlyExhaustedWindow
+HELP-SNAPSHOTS:
+  doc: docs/cli-contract.md#help-snapshots
+  test: io.amscotti.bravesearch.bootstrap.HelpSnapshotTest#everyCommandHelpMatchesItsGoldenSnapshot
+RELEASE-ARCHIVE-LAYOUT:
+  doc: docs/release.md#artifact-layout
+  test: io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest#archiveNameAndTopLevelDirectoryFollowTheTargetTripleForm
+RELEASE-CHECKSUMS:
+  doc: docs/release.md#checksums
+  test: io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest#checksumsFileCoversEveryReleaseArtifactAndItsDigestMatches
+RELEASE-SBOM-RUNTIME-ONLY:
+  doc: docs/release.md#sbom-scope
+  test: io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest#sbomListsExactlyTheProductionRuntimeDependencies
+RELEASE-LOCAL-VERIFICATION:
+  doc: docs/release.md#local-verification
+  test: io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest#unpackedBinaryKeepsItsExecutableModeAndRunsVersion
+CI-MATRIX-AUTHORED:
+  doc: docs/release.md#ci-matrix
+  test: io.amscotti.bravesearch.release.WorkflowContractTest#ciJobsMatchThePinnedRunnerMatrixAndShaPinnedActions
+RELEASE-TAMPER-DRILL:
+  doc: docs/release.md#local-verification
+  test: io.amscotti.bravesearch.release.WorkflowContractTest#releaseWorkflowRunsTheTamperDrillBeforePublishing
+# The LIVE requirements are pinned by the opt-in live protocol smoke: tagged tests that the
+# default build excludes and only -PliveBraveTests=true executes with a resolvable
+# credential (see docs/release.md#live-protocol-smoke). They are never required for pull
+# requests; the referenced methods exist and are @Test even while conditionally skipped.
+LIVE-WEB-PROTOCOL:
+  doc: docs/release.md#live-protocol-smoke
+  test: io.amscotti.bravesearch.adapter.bravehttp.live.LiveWebSearchTest#boundedWebSearchHoldsTheProtocolInvariants
+LIVE-CONTEXT-PROTOCOL:
+  doc: docs/release.md#live-protocol-smoke
+  test: io.amscotti.bravesearch.adapter.bravehttp.live.LiveContextTest#boundedLlmContextHoldsTheProtocolInvariants
+LIVE-PLACES-PROTOCOL:
+  doc: docs/release.md#live-protocol-smoke
+  test: io.amscotti.bravesearch.adapter.bravehttp.live.LivePlacesTest#anchoredPlaceSearchHoldsTheProtocolInvariants
+LIVE-ANSWERS-WIRE-FORM:
+  doc: docs/release.md#live-protocol-smoke
+  test: io.amscotti.bravesearch.adapter.bravehttp.live.LiveAnswersTest#blockingAnswerWithNestedSearchControlsIsAccepted
+LIVE-API-VERSION-OBSERVATION:
+  doc: docs/release.md#live-protocol-smoke
+  test: io.amscotti.bravesearch.adapter.bravehttp.live.LiveApiVersionObservationTest#pinnedBaselineExchangeIsEvaluatedByTheUpstream

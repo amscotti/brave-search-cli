@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-upstream-event.schema.json",
+  "title": "answers stream upstream_event record (v1)",
+  "description": "One preserved upstream event of a streamed answers run: a well-formed tag outside the documented set, or a documented tag whose semantics no live evidence has pinned yet, kept verbatim with its name and its raw payload text — bounded by the stream decode ceilings. An unknown tag whose server-sent-event block carried an id, retry, or event name preserves them as the optional sse_id, sse_retry_ms, and event_name members.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "upstream_event"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "tag": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw": {
+      "$comment": "The tag's raw payload text exactly as the stream carried it.",
+      "type": "string"
+    },
+    "sse_id": {
+      "$comment": "The most recent id field of the SSE block that carried the tag, present exactly when the block offered one.",
+      "type": "string",
+      "minLength": 1
+    },
+    "sse_retry_ms": {
+      "$comment": "The retry milliseconds current at the block's dispatch, present exactly when a valid retry was seen.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_name": {
+      "$comment": "The event field's value of the SSE block that carried the tag, present exactly when the block named its event.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["schema_version", "type", "command", "tag", "raw"],
+  "additionalProperties": false
+}

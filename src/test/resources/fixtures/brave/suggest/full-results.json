@@ -1,0 +1,27 @@
+{
+  "type": "suggest",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [
+    {
+      "query": "three word query one",
+      "type": "query"
+    },
+    {
+      "query": "three word query two",
+      "type": "entity",
+      "is_entity": true,
+      "title": "Enriched Title",
+      "description": "Enriched description text.",
+      "img": "https://images.example.com/enriched.png"
+    },
+    {
+      "query": 42
+    }
+  ],
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/config-show.schema.json",
+  "title": "Config show record (v1)",
+  "description": "The single compact, LF-terminated JSON object `config show --output json` writes: the winning credential source, the resolved config-file path, whether an effective credential exists, and which lower-precedence sources are shadowed. Presence and provenance only — the record never carries the credential, a fingerprint, a length, or any other reusable token material, so the schema pins every member with additionalProperties false.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "command": {
+      "const": "config.show"
+    },
+    "source": {
+      "$comment": "The winning source's provenance name: an environment variable's spoken name, config file, or missing.",
+      "type": "string",
+      "minLength": 1
+    },
+    "config_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_key_present": {
+      "$comment": "True exactly when an effective credential resolved — false only for the missing-everywhere case.",
+      "type": "boolean"
+    },
+    "shadowed": {
+      "$comment": "The lower-precedence sources the winner overrides: the compatibility alias variable and/or the config file, in precedence order.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^([A-Z][A-Z0-9_]*|config file)$"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["schema_version", "command", "source", "config_path", "api_key_present", "shadowed"],
+  "additionalProperties": false
+}

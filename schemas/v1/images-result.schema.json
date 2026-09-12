@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/images-result.schema.json",
+  "title": "images result record (v1)",
+  "description": "One logical images search result as one JSONL result record: the original zero-based position in the upstream results array, the constant images bucket, and the usable textual members the upstream result carried — the result page url plus the full-size and thumbnail image urls. Absent members are omitted, never emitted as null.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "images"
+    },
+    "bucket": {
+      "const": "images"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "$comment": "The result page the image was found on.",
+      "type": "string"
+    },
+    "image": {
+      "$comment": "The full-size image url the result points at.",
+      "type": "string"
+    },
+    "thumbnail": {
+      "$comment": "The thumbnail image url of the result.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position"],
+  "additionalProperties": false
+}

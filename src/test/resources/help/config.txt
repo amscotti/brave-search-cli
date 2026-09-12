@@ -1,0 +1,15 @@
+Usage: brave-search config [-hV] [--no-color] [--quiet] [--verbose] [COMMAND]
+Manage the local Brave credential configuration.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.
+Commands:
+  set-key             Store the API key read from a no-echo console, or from
+                        one --stdin line.
+  unset-key           Remove the stored API key from the config file.
+  show                Print the effective credential source and config-file
+                        state.
+  repair-permissions  Reset the credential file and its directory to owner-only
+                        permissions.

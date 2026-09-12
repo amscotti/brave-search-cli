@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-summary.schema.json",
+  "title": "answers stream summary record (v1)",
+  "description": "The terminal record of a successful streamed answers run: the open exchange's observed metadata, the run's counts, and — exactly when a final usage event arrived — the observed usage at exact decimal scale. A stream that completed without usage omits the usage member and marks the cost unknown instead, so an unreported cost never reads as free.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "summary"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "api_version": {
+      "type": "string"
+    },
+    "deltas_emitted": {
+      "$comment": "The answer_delta records emitted before the terminal record.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "citations_seen": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entities_seen": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "usage": {
+      "$comment": "Present exactly when a final usage event arrived; never invented.",
+      "$ref": "usage.schema.json"
+    },
+    "cost_unknown": {
+      "$comment": "True exactly when the stream ended without a final usage event: no cost figure may be assumed, and zero is a figure.",
+      "type": "boolean"
+    }
+  },
+  "required": ["schema_version", "type", "command", "http_status", "deltas_emitted", "citations_seen", "entities_seen", "cost_unknown"],
+  "additionalProperties": false
+}

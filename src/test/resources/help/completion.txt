@@ -1,0 +1,9 @@
+Usage: brave-search completion [-hV] [--no-color] [--quiet] [--verbose] SHELL
+Print a shell completion script for bash or zsh to stdout.
+      SHELL        The target shell: bash or zsh.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.
+Install by sourcing the printed script from your shell profile.

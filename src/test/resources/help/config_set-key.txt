@@ -1,0 +1,10 @@
+Usage: brave-search config set-key [-hV] [--no-color] [--quiet] [--stdin]
+                                   [--verbose]
+Store the API key read from a no-echo console, or from one --stdin line.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+      --stdin      Read exactly one LF/CRLF-terminated UTF-8 line from stdin
+                     instead of the no-echo console.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.

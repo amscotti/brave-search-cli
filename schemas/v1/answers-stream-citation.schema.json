@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-citation.schema.json",
+  "title": "answers stream citation record (v1)",
+  "description": "One citation of a streamed answers run, carried when its citation tag closes: the projected members of the tag's JSON payload, each present only when the payload offered it.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "citation"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "number": {
+      "$comment": "The citation's ordinal as the payload numbered it, zero included.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "url": {
+      "type": "string"
+    },
+    "favicon": {
+      "type": "string"
+    },
+    "snippet": {
+      "type": "string"
+    },
+    "start_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_index": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": ["schema_version", "type", "command"],
+  "additionalProperties": false
+}

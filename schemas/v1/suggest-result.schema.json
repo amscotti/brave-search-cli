@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/suggest-result.schema.json",
+  "title": "suggest result record (v1)",
+  "description": "One logical suggestion as one JSONL result record: the original zero-based position in the upstream results array, the constant suggest bucket, the suggested query completion, and the usable textual members a rich suggestion carried — the suggestion kind plus the enriched title, description, and image url. Absent members are omitted, never emitted as null; the deprecated upstream is_entity flag is not carried because type is its documented replacement.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "suggest"
+    },
+    "bucket": {
+      "const": "suggest"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "query": {
+      "$comment": "The suggested query completion.",
+      "type": "string"
+    },
+    "suggestion_type": {
+      "$comment": "The kind of suggestion the upstream result named: query or entity; unrecognized kinds stay plain query suggestions.",
+      "type": "string"
+    },
+    "title": {
+      "$comment": "The enriched title a rich suggestion carried.",
+      "type": "string"
+    },
+    "description": {
+      "$comment": "The enriched description a rich suggestion carried.",
+      "type": "string"
+    },
+    "img": {
+      "$comment": "The enriched image url a rich suggestion carried.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position", "query"],
+  "additionalProperties": false
+}

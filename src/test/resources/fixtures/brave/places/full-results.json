@@ -1,0 +1,61 @@
+{
+  "type": "places",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [
+    {
+      "id": "place-first",
+      "title": "First Place",
+      "address": "1 Main St, Philadelphia PA",
+      "rating": {
+        "rating_value": 4.5,
+        "rating_count": 1212
+      },
+      "distance": "1.2 km",
+      "phone": "+1 215 555 0100",
+      "website": "https://example.com/first",
+      "unknown_result_field": {
+        "score": 0.125
+      }
+    },
+    {
+      "id": "place-second",
+      "title": "Second Place",
+      "address": "2 Main St, Philadelphia PA",
+      "rating": {
+        "rating_value": 4,
+        "rating_count": 7
+      }
+    },
+    {
+      "id": 42
+    }
+  ],
+  "cities": [
+    {
+      "id": "city-philadelphia",
+      "title": "Philadelphia",
+      "address": "Pennsylvania, United States"
+    }
+  ],
+  "countries": null,
+  "regions": [],
+  "neighborhoods": null,
+  "addresses": [
+    {
+      "id": "addr-market",
+      "title": "1200 Market St"
+    }
+  ],
+  "streets": null,
+  "mixed": [
+    {
+      "unknown_ordering_hint": true
+    }
+  ],
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

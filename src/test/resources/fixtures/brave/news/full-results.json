@@ -1,0 +1,33 @@
+{
+  "query": {
+    "original": "three word query"
+  },
+  "news": {
+    "results": [
+      {
+        "title": "First Headline",
+        "url": "https://example.com/first",
+        "description": "First description text.",
+        "age": "2 hours ago",
+        "unknown_result_field": {
+          "score": 0.125
+        }
+      },
+      {
+        "title": "Second Headline",
+        "url": "https://example.com/second",
+        "age": "2026-08-30T12:00:00Z"
+      },
+      {
+        "title": 42,
+        "url": "https://example.com/third",
+        "description": "Third description.",
+        "age": 7
+      }
+    ]
+  },
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

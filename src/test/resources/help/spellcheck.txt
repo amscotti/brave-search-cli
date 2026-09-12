@@ -1,0 +1,40 @@
+Usage: brave-search spellcheck [-hV] [--no-color] [--pretty] [--quiet] [--[no-]
+                               spellcheck] [--verbose]
+                               [--api-version=<apiVersion>]
+                               [--connect-timeout=<connectTimeout>]
+                               [--count=<n>] [--country=<code>]
+                               [--freshness=<freshness>] [-o=<output>]
+                               [--page=<1..10>] [--safe-search=<safeSearch>]
+                               [--search-lang=<tag>] [--timeout=<totalTimeout>]
+                               [--ui-lang=<tag>] QUERY
+Spell-check one query and print the corrections.
+      QUERY                 The query to spell-check; quote it and use -- when
+                              it starts like an option.
+      --api-version=<apiVersion>
+                            Pin the Api-Version header to a real calendar date,
+                              YYYY-MM-DD.
+      --connect-timeout=<connectTimeout>
+                            Client connection timeout, for example 10s; default
+                              10s.
+      --count=<n>           Result count within the endpoint's documented range.
+      --country=<code>      Two-letter result country code.
+      --freshness=<freshness>
+                            pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD.
+  -h, --help                Show this help message and exit.
+      --no-color            Disable ANSI color unconditionally; NO_COLOR
+                              disables it too.
+  -o, --output=<output>     Output channel: human, json, jsonl, or raw.
+      --page=<1..10>        User-facing page; sent as its zero-based offset.
+      --pretty              Pretty-print JSON; invalid with jsonl and raw.
+      --quiet               Suppress optional diagnostics, never errors.
+      --safe-search=<safeSearch>
+                            off, moderate, or strict.
+      --search-lang=<tag>   Result language tag.
+      --[no-]spellcheck     Ask upstream to correct the query spelling.
+      --timeout=<totalTimeout>
+                            Total non-stream request timeout, for example 30s;
+                              default 30s.
+      --ui-lang=<tag>       Interface language tag.
+  -V, --version             Print version information to stdout and exit.
+      --verbose             Print diagnostics and resolved non-secret metadata
+                              to stderr.

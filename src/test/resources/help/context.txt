@@ -1,0 +1,80 @@
+Usage: brave-search context [-hV] [--no-color] [--pretty] [--quiet] [--[no-]
+                            source-metadata] [--[no-]spellcheck] [--verbose]
+                            [--api-version=<apiVersion>]
+                            [--connect-timeout=<connectTimeout>] [--count=<n>]
+                            [--country=<code>] [--freshness=<freshness>]
+                            [--loc-city=<text>] [--loc-country=<code>]
+                            [--loc-lat=<decimal>] [--loc-long=<decimal>]
+                            [--loc-postal-code=<text>] [--loc-state=<code>]
+                            [--loc-state-name=<text>] [--local=<auto|on|off>]
+                            [--max-snippets=<1..256>]
+                            [--max-snippets-per-url=<1..100>]
+                            [--max-tokens=<1024..32768>]
+                            [--max-tokens-per-url=<512..8192>] [--max-urls=<1..
+                            50>] [-o=<output>] [--page=<1..10>]
+                            [--safe-search=<safeSearch>] [--search-lang=<tag>]
+                            [--threshold=<mode>] [--timeout=<totalTimeout>]
+                            [--ui-lang=<tag>] QUERY
+Retrieve LLM-ready search context for one query.
+      QUERY                  One search query; quote it and use -- when it
+                               starts like an option.
+      --api-version=<apiVersion>
+                             Pin the Api-Version header to a real calendar
+                               date, YYYY-MM-DD.
+      --connect-timeout=<connectTimeout>
+                             Client connection timeout, for example 10s;
+                               default 10s.
+      --count=<n>            Result count within the endpoint's documented
+                               range.
+      --country=<code>       Two-letter result country code.
+      --freshness=<freshness>
+                             pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD.
+  -h, --help                 Show this help message and exit.
+      --loc-city=<text>      Location city name.
+      --loc-country=<code>   Location country, two uppercase letters.
+      --loc-lat=<decimal>    Location latitude, -90 to 90; pairs with
+                               --loc-long.
+      --loc-long=<decimal>   Location longitude, -180 to 180; pairs with
+                               --loc-lat.
+      --loc-postal-code=<text>
+                             Location postal code.
+      --loc-state=<code>     Location state, two uppercase letters.
+      --loc-state-name=<text>
+                             Location state full name.
+      --local=<auto|on|off>  Local recall: auto defers to Brave, on and off pin
+                               it.
+      --max-snippets=<1..256>
+                             Per-request snippet budget, 1 to 256; the default
+                               follows Brave.
+      --max-snippets-per-url=<1..100>
+                             Per-url snippet budget, 1 to 100; the default
+                               follows Brave.
+      --max-tokens=<1024..32768>
+                             Per-request token budget, 1024 to 32768; the
+                               default follows Brave.
+      --max-tokens-per-url=<512..8192>
+                             Per-url token budget, 512 to 8192; the default
+                               follows Brave.
+      --max-urls=<1..50>     Per-request URL budget, 1 to 50; the default
+                               follows Brave.
+      --no-color             Disable ANSI color unconditionally; NO_COLOR
+                               disables it too.
+  -o, --output=<output>      Output channel: human, json, jsonl, or raw.
+      --page=<1..10>         User-facing page; sent as its zero-based offset.
+      --pretty               Pretty-print JSON; invalid with jsonl and raw.
+      --quiet                Suppress optional diagnostics, never errors.
+      --safe-search=<safeSearch>
+                             off, moderate, or strict.
+      --search-lang=<tag>    Result language tag.
+      --[no-]source-metadata Attach source metadata to the sources map; off by
+                               default upstream.
+      --[no-]spellcheck      Ask upstream to correct the query spelling.
+      --threshold=<mode>     Context threshold mode: strict, balanced, lenient,
+                               or disabled.
+      --timeout=<totalTimeout>
+                             Total non-stream request timeout, for example 30s;
+                               default 30s.
+      --ui-lang=<tag>        Interface language tag.
+  -V, --version              Print version information to stdout and exit.
+      --verbose              Print diagnostics and resolved non-secret metadata
+                               to stderr.

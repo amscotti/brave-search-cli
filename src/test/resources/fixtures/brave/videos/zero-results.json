@@ -1,0 +1,10 @@
+{
+  "type": "videos",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [],
+  "extra": {
+    "might_be_offensive": false
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/places-describe-result.schema.json",
+  "title": "places describe result record (v1)",
+  "description": "One requested POI id of a places describe invocation as one JSONL result record, at its original zero-based input position: present true with the AI-generated description text the returned entry carried, or present false as the placeholder of a missing or expired id. A duplicate input id renders again at each of its positions. An absent description is omitted, never emitted as null.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "places.describe"
+    },
+    "position": {
+      "$comment": "The original zero-based position of the id in the invocation's input order.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "bucket": {
+      "const": "descriptions"
+    },
+    "id": {
+      "$comment": "The opaque, ephemeral upstream POI id exactly as the caller supplied it; never validated for internal format.",
+      "type": "string"
+    },
+    "present": {
+      "$comment": "Whether the chunk's response carried an entry matching this position's id.",
+      "type": "boolean"
+    },
+    "description": {
+      "$comment": "The AI-generated description text the entry carried.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "position", "bucket", "id", "present"],
+  "additionalProperties": false
+}

@@ -1,0 +1,264 @@
+# Continuous verification of the repository: the full clean check on both release hosts, the
+# repository hygiene gate, the native process suite on the exact release runners, and
+# dependency verification against the committed lock state and checksums. Every action is
+# pinned by the full commit SHA its tag resolves to on the GitHub API. The workflow takes
+# effect automatically once this repository is published on GitHub; until then the local
+# Gradle mirrors (releaseArchive, sha256Sums, dependencyTamperProof, WorkflowContractTest) pin
+# the same contracts from the same tree.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# one run per reference: a superseded push to the same branch or pull request is cancelled
+# instead of racing it for the same runners
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  jvm-check:
+    name: jvm-check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, ubuntu-24.04-arm]
+    timeout-minutes: 90
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install shells for completion syntax checks
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Cross-check native-image resolution against the pinned toolchain
+        run: |
+          mise exec -- bash -c '
+            set -euo pipefail
+            "$JAVA_HOME/bin/native-image" --version
+            on_path="$(command -v native-image)"
+            echo "native-image via PATH: $on_path"
+            expected="$JAVA_HOME/bin/native-image"
+            if [ "$(dirname "$on_path")" != "$(dirname "$expected")" ]; then
+              echo "native-image on PATH ($on_path) is outside the pinned toolchain ($expected)" >&2
+              exit 1
+            fi
+          '
+      - name: Clean check through mise
+        # one native image build per leg, not two: the toolchain proof below reads the
+        # selection line out of this invocation's log instead of building the image a
+        # second time first, so the check costs a single builder heap at a time
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/gradle-check.log"
+          env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain --warning-mode=all --info --max-workers=2 clean check 2>&1 | tee "$log"
+      - name: Assert the check built with the pinned toolchain's native-image
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/gradle-check.log"
+          selected="$(grep -m1 'Native Image executable path:' "$log" | sed 's/.*: //')"
+          echo "native-image selected by the check build: $selected"
+          case "$selected" in
+            *graalvm-community-25.0.2*)
+              echo "selection OK: $selected"
+              ;;
+            *)
+              echo "the check built with a native-image outside the pinned toolchain: $selected" >&2
+              exit 1
+              ;;
+          esac
+      - name: Upload test reports when the leg fails
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: jvm-check-${{ matrix.os }}-reports
+          path: |
+            build/test-results/
+            build/reports/tests/
+          if-no-files-found: warn
+
+  hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Fail if a credential file is tracked
+        run: |
+          set -euo pipefail
+          # only the tracked set is consulted: actions/checkout leaves the index identical to
+          # HEAD and nothing stages files on the runner, so an index-diff check can never fire
+          if git ls-files -- .env '.env.*' | grep -v '^\.env\.example$' | grep -q .; then
+            echo "a by-design ignored credential file is tracked" >&2
+            exit 1
+          fi
+      - name: Run the repository hygiene gate
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain hygieneCheck
+      - name: Verify release tag authorization against GitHub API fixtures
+        run: node --test .github/tests/release.test.mjs
+
+  native-smoke:
+    name: native-smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            expected-arch: arm64
+          - os: ubuntu-24.04
+            expected-arch: x86_64
+          - os: ubuntu-24.04-arm
+            expected-arch: aarch64
+    timeout-minutes: 90
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert the host architecture matches the release target
+        run: |
+          set -euo pipefail
+          actual="$(uname -m)"
+          echo "host arch: $actual, expected: ${{ matrix.expected-arch }}"
+          test "$actual" = "${{ matrix.expected-arch }}"
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Cross-check native-image resolution against the pinned toolchain
+        run: |
+          mise exec -- bash -c '
+            set -euo pipefail
+            "$JAVA_HOME/bin/native-image" --version
+            on_path="$(command -v native-image)"
+            echo "native-image via PATH: $on_path"
+            expected="$JAVA_HOME/bin/native-image"
+            if [ "$(dirname "$on_path")" != "$(dirname "$expected")" ]; then
+              echo "native-image on PATH ($on_path) is outside the pinned toolchain ($expected)" >&2
+              exit 1
+            fi
+          '
+      - name: Run the native process smoke suite
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain nativeSmokeTest
+      - name: Upload test reports when the leg fails
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: native-smoke-${{ matrix.os }}-reports
+          path: |
+            build/test-results/
+            build/reports/tests/
+          if-no-files-found: warn
+
+  dependency-verification:
+    name: dependency lock state and artifact verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install shells for completion syntax checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Rewrite lock state and fail on any drift or extraneous entry
+        run: |
+          set -euo pipefail
+          env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain --write-locks resolveAndLockAll
+          git diff --exit-code -- gradle.lockfile settings-gradle.lockfile
+      - name: Virgin-user-home strict-verification resolve
+        run: |
+          set -euo pipefail
+          virgin="$(mktemp -d)"
+          mkdir -p "$virgin/wrapper"
+          if [ -d "$HOME/.gradle/wrapper/dists" ]; then
+            ln -s "$HOME/.gradle/wrapper/dists" "$virgin/wrapper/dists"
+          fi
+          GRADLE_USER_HOME="$virgin" env -u GRAALVM_HOME mise exec -- \
+            ./gradlew --no-daemon --console=plain clean compileTestFixturesJava testClasses
+      - name: Clean-cache strict-verification build
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain --refresh-dependencies --max-workers=2 clean test

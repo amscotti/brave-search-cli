@@ -1,0 +1,32 @@
+: brave answers stream
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+id: ans-0142
+retry: 2500
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"Brave Search "},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"is an independent index that does not track users, with per-query costs < 0.002."},"finish_reason":null}]}
+
+: heartbeat
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"<progress>{\"completed\":2,\"total\":5,\"action\":\"searching\"}</progress>Research trace: <thinking>{\"plan\":\""},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"verify sources, then draft\"}</thinking><queries>{\"queries\":[\"brave search independence\",\"brave search privacy\"]}</queries>"},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"<analyzing>{\"documents\":12,\"relevant\":7}</analyzing><blindspots>{\"gaps\":[\"non-English sources\"]}</blindspots>Early coverage <ci"},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"tation>{\"start_index\":0,\"end_index\":12,\"number\":1,\"url\":\"https://search.brave.com/\",\"favicon\":\"https://search.brave.com/favicon.ico\",\"snippet\":\"an independent index where a < b holds\"}</citation>establishes the baseline."},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"<entity>{\"name\":\"Brave Software\",\"url\":\"https://brave.com\"}</entity><weather>{\"temperature_c\":21}</weather>"},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{"content":"<answer>{\"text\":\"An independent index with its own crawler.\"}</answer><usage>{\"X-Request-Requests\":\"1\",\"X-Request-Queries\":\"2\",\"X-Request-Tokens-In\":\"900\",\"X-Request-Tokens-Out\":\"120\",\"X-Request-Total-Cost\":\"0.0042\"}</usage>"},"finish_reason":null}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"ans_01","object":"chat.completion.chunk","created":1756579200,"model":"brave","choices":[],"usage":{"prompt_tokens":900,"completion_tokens":120,"total_tokens":1020}}
+
+data: [DONE]
+
+: stream closed

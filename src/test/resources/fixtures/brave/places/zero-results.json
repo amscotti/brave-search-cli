@@ -1,0 +1,13 @@
+{
+  "type": "places",
+  "query": {
+    "original": "three word query"
+  },
+  "results": null,
+  "cities": null,
+  "countries": null,
+  "regions": null,
+  "neighborhoods": null,
+  "addresses": null,
+  "streets": null
+}

@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/jsonl-record.schema.json",
+  "title": "JSON Lines record (v1)",
+  "description": "One independent, compact, LF-terminated JSON object per line. The leading members are exactly schema_version, type, and command, followed by the record payload. Lines never contain headings, ANSI escapes, or any other human decoration; every line is independently parseable by a naive line reader.",
+  "oneOf": [
+    {
+      "title": "result record",
+      "description": "One logical search result in presentation order; per-command schemas pin the payload fields, including the explicit bucket or type and the original zero-based position. The web command's payload is pinned by web-result.schema.json, its multi-request pagination form by web-paged-result.schema.json, the context command's single-record form by context-result.schema.json.",
+      "$ref": "web-result.schema.json"
+    },
+    {
+      "title": "paged result record",
+      "description": "One logical search result of a multi-request pagination run, carrying the page it came from beside its position; the web command's pagination payload is pinned by web-paged-result.schema.json, the news command's by news-paged-result.schema.json.",
+      "$ref": "web-paged-result.schema.json"
+    },
+    {
+      "title": "news result record",
+      "description": "One logical news search result in presentation order, including its freshness age; pinned by news-result.schema.json.",
+      "$ref": "news-result.schema.json"
+    },
+    {
+      "title": "news paged result record",
+      "description": "One logical news result of a multi-request pagination run, carrying the page it came from beside its position and its freshness age; pinned by news-paged-result.schema.json.",
+      "$ref": "news-paged-result.schema.json"
+    },
+    {
+      "title": "videos result record",
+      "description": "One logical videos search result in presentation order, including its freshness age; pinned by videos-result.schema.json.",
+      "$ref": "videos-result.schema.json"
+    },
+    {
+      "title": "videos paged result record",
+      "description": "One logical videos result of a multi-request pagination run, carrying the page it came from beside its position and its freshness age; pinned by videos-paged-result.schema.json.",
+      "$ref": "videos-paged-result.schema.json"
+    },
+    {
+      "title": "images result record",
+      "description": "One logical images search result in presentation order, carrying the result page url plus the full-size and thumbnail image urls; pinned by images-result.schema.json.",
+      "$ref": "images-result.schema.json"
+    },
+    {
+      "title": "suggest result record",
+      "description": "One logical suggestion in presentation order, carrying the suggested query completion and the usable rich members; pinned by suggest-result.schema.json.",
+      "$ref": "suggest-result.schema.json"
+    },
+    {
+      "title": "spellcheck result record",
+      "description": "One logical spellcheck correction in presentation order, carrying the spellcheck-corrected query; pinned by spellcheck-result.schema.json.",
+      "$ref": "spellcheck-result.schema.json"
+    },
+    {
+      "title": "context result record",
+      "description": "The whole LLM context document as one logical result: the constant context bucket and the joined passage text of the usable grounding.generic entries; pinned by context-result.schema.json.",
+      "$ref": "context-result.schema.json"
+    },
+    {
+      "title": "rich result record",
+      "description": "One vertical block of a rich callback response, labeled with the vertical's own upstream member name as its bucket; pinned by rich-result.schema.json.",
+      "$ref": "rich-result.schema.json"
+    },
+    {
+      "title": "places result record",
+      "description": "One logical place of a place search in presentation order, labeled with the response bucket it was enumerated from and its position inside that bucket; pinned by places-result.schema.json.",
+      "$ref": "places-result.schema.json"
+    },
+    {
+      "title": "places details result record",
+      "description": "One requested POI id of a places details fan-out, at its original input position, present or placeholder; pinned by places-details-result.schema.json.",
+      "$ref": "places-details-result.schema.json"
+    },
+    {
+      "title": "places describe result record",
+      "description": "One requested POI id of a places describe fan-out, at its original input position, present or placeholder; pinned by places-describe-result.schema.json.",
+      "$ref": "places-describe-result.schema.json"
+    },
+    {
+      "title": "answers stream answer_delta record",
+      "description": "One increment of a streamed answers run; pinned by answers-stream-delta.schema.json.",
+      "$ref": "answers-stream-delta.schema.json"
+    },
+    {
+      "title": "answers stream citation record",
+      "description": "One citation of a streamed answers run; pinned by answers-stream-citation.schema.json.",
+      "$ref": "answers-stream-citation.schema.json"
+    },
+    {
+      "title": "answers stream entity record",
+      "description": "One entity of a streamed answers run; pinned by answers-stream-entity.schema.json.",
+      "$ref": "answers-stream-entity.schema.json"
+    },
+    {
+      "title": "answers stream research_progress record",
+      "description": "One research-family event of a streamed answers run; pinned by answers-stream-research-progress.schema.json.",
+      "$ref": "answers-stream-research-progress.schema.json"
+    },
+    {
+      "title": "answers stream upstream_event record",
+      "description": "One preserved upstream event of a streamed answers run; pinned by answers-stream-upstream-event.schema.json.",
+      "$ref": "answers-stream-upstream-event.schema.json"
+    },
+    {
+      "title": "warning record",
+      "description": "One advisory warning; the payload is exactly one nonempty message string.",
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "type": {
+          "const": "warning"
+        },
+        "command": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "type",
+        "command",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "summary record",
+      "description": "The terminal record of a successful stream; per-command schemas pin the payload fields. The web command's payload is pinned by web-summary.schema.json, its multi-request pagination form by web-paged-summary.schema.json, the context command's form by context-summary.schema.json.",
+      "$ref": "web-summary.schema.json"
+    },
+    {
+      "title": "paged summary record",
+      "description": "The terminal record of a successful multi-request pagination run; the web command's pagination payload is pinned by web-paged-summary.schema.json.",
+      "$ref": "web-paged-summary.schema.json"
+    },
+    {
+      "title": "news summary record",
+      "description": "The terminal record of a successful non-streaming news search; pinned by news-summary.schema.json.",
+      "$ref": "news-summary.schema.json"
+    },
+    {
+      "title": "news paged summary record",
+      "description": "The terminal record of a successful multi-request news pagination run; pinned by news-paged-summary.schema.json.",
+      "$ref": "news-paged-summary.schema.json"
+    },
+    {
+      "title": "videos summary record",
+      "description": "The terminal record of a successful non-streaming videos search; pinned by videos-summary.schema.json.",
+      "$ref": "videos-summary.schema.json"
+    },
+    {
+      "title": "videos paged summary record",
+      "description": "The terminal record of a successful multi-request videos pagination run; pinned by videos-paged-summary.schema.json.",
+      "$ref": "videos-paged-summary.schema.json"
+    },
+    {
+      "title": "images summary record",
+      "description": "The terminal record of a successful non-streaming images search; pinned by images-summary.schema.json.",
+      "$ref": "images-summary.schema.json"
+    },
+    {
+      "title": "suggest summary record",
+      "description": "The terminal record of a successful suggest lookup; pinned by suggest-summary.schema.json.",
+      "$ref": "suggest-summary.schema.json"
+    },
+    {
+      "title": "spellcheck summary record",
+      "description": "The terminal record of a successful spellcheck lookup; pinned by spellcheck-summary.schema.json.",
+      "$ref": "spellcheck-summary.schema.json"
+    },
+    {
+      "title": "context summary record",
+      "description": "The terminal record of a successful non-streaming LLM context retrieval, carrying the snippet and source counts; pinned by context-summary.schema.json.",
+      "$ref": "context-summary.schema.json"
+    },
+    {
+      "title": "rich summary record",
+      "description": "The terminal record of a successful rich callback lookup, counting the vertical blocks and their total items; pinned by rich-summary.schema.json.",
+      "$ref": "rich-summary.schema.json"
+    },
+    {
+      "title": "places summary record",
+      "description": "The terminal record of a successful place search, counting the places of every response bucket together; pinned by places-summary.schema.json.",
+      "$ref": "places-summary.schema.json"
+    },
+    {
+      "title": "places details summary record",
+      "description": "The terminal record of a successful places details walk, counting the ids, the returned and missing positions, and the chunk requests; pinned by places-details-summary.schema.json.",
+      "$ref": "places-details-summary.schema.json"
+    },
+    {
+      "title": "places describe summary record",
+      "description": "The terminal record of a successful places describe walk, counting the ids, the returned and missing positions, and the chunk requests; pinned by places-describe-summary.schema.json.",
+      "$ref": "places-describe-summary.schema.json"
+    },
+    {
+      "title": "answers stream summary record",
+      "description": "The terminal record of a successful streamed answers run, carrying the observed usage at exact decimal scale or the cost-unknown marker; pinned by answers-stream-summary.schema.json.",
+      "$ref": "answers-stream-summary.schema.json"
+    },
+    {
+      "title": "error record",
+      "description": "The terminal record of a failed stream; the payload is exactly the failure code, message, and retryability; a failed multi-request pagination run additionally reports its page counts, a failed streamed answers run its partial counts and its cost-unknown marker, and — exactly when the failing exchange observed a rate-limit snapshot — the observed quota windows ride last, in the same per-window rendering as the envelope's meta.rate_limits.",
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "type": {
+          "const": "error"
+        },
+        "command": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+        },
+        "code": {
+          "enum": [
+            "USAGE_ERROR",
+            "LOCAL_CONFIG_ERROR",
+            "AUTHENTICATION_FAILED",
+            "RATE_LIMITED",
+            "TRANSPORT_ERROR",
+            "UPSTREAM_ERROR",
+            "MALFORMED_RESPONSE",
+            "INTERNAL_ERROR",
+            "INTERRUPTED",
+            "TERMINATED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "rate_limits": {
+          "$comment": "Present exactly when the failing exchange observed a rate-limit snapshot: for a 429, the windows that explain it; absent when the break predates any header observation (a transport-local break).",
+          "type": "array",
+          "items": {
+            "$ref": "rate-limit.schema.json"
+          }
+        },
+        "requested_pages": {
+          "$comment": "Present only for a failed multi-request pagination run: the page budget it was given.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "received_pages": {
+          "$comment": "Present only for a failed multi-request pagination run: the pages completed before the failure.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "requested_requests": {
+          "$comment": "Present only for a failed multi-request chunk fan-out: the chunk request count it was given.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "received_requests": {
+          "$comment": "Present only for a failed multi-request chunk fan-out: the chunk requests completed before the failure.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "deltas_emitted": {
+          "$comment": "Present only for a failed streamed answers run: the answer_delta records emitted before the failure.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "citations_seen": {
+          "$comment": "Present only for a failed streamed answers run: the citation records emitted before the failure.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_unknown": {
+          "$comment": "Present only for a failed streamed answers run: true exactly when it ended without a final usage event, so an unreported cost never reads as free.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "type",
+        "command",
+        "code",
+        "message",
+        "retryable"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

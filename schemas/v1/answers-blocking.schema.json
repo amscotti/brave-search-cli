@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-blocking.schema.json",
+  "title": "answers blocking projection (v1)",
+  "description": "The stable projection of one blocking answers success inside the JSON envelope's data.projection: the answer text (omitted when the response offered none), the citation count, and the citations the response carried with their usable members. The lossless chat-completions document rides data.upstream and the header-observed usage counters ride meta.usage.",
+  "type": "object",
+  "properties": {
+    "answer": {
+      "$comment": "The first choice's message content; omitted when the response carried no usable answer text.",
+      "type": "string"
+    },
+    "citation_count": {
+      "$comment": "The number of citation entries the response carried.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "citations": {
+      "$comment": "The response's citations in document order; empty when it carried none.",
+      "type": "array",
+      "items": {
+        "$ref": "answers-blocking-citation.schema.json"
+      }
+    }
+  },
+  "required": ["citation_count", "citations"],
+  "additionalProperties": false
+}

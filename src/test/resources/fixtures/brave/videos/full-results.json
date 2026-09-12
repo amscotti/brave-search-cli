@@ -1,0 +1,41 @@
+{
+  "type": "videos",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [
+    {
+      "type": "video_result",
+      "title": "First Video",
+      "url": "https://example.com/first",
+      "description": "First description text.",
+      "age": "2 days ago",
+      "video": {
+        "duration": "4:13"
+      },
+      "unknown_result_field": {
+        "score": 0.125
+      }
+    },
+    {
+      "type": "video_result",
+      "title": "Second Video",
+      "url": "https://example.com/second",
+      "age": "2026-08-30T12:00:00Z"
+    },
+    {
+      "type": "video_result",
+      "title": 42,
+      "url": "https://example.com/third",
+      "description": "Third description.",
+      "age": 7
+    }
+  ],
+  "extra": {
+    "might_be_offensive": false
+  },
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

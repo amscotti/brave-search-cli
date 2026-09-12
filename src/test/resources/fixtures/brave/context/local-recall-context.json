@@ -1,0 +1,27 @@
+{
+  "query": {
+    "original": "coffee near me"
+  },
+  "grounding": {
+    "generic": [
+      {
+        "text": "Nearby passage about the area."
+      }
+    ],
+    "poi": {
+      "name": "Local Point of Interest",
+      "score": 0.75
+    },
+    "map": [
+      {
+        "id": "map/nearby",
+        "name": "Local Point of Interest"
+      }
+    ]
+  },
+  "sources": {
+    "https://example.com/local": {
+      "title": "Local Source"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/rate-limit.schema.json",
+  "title": "Rate limit window (v1)",
+  "description": "One upstream quota window. A limit of 0 means unlimited, never exhausted; reset_ms is the nonnegative remaining window duration in milliseconds.",
+  "type": "object",
+  "properties": {
+    "policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "remaining": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reset_ms": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": ["policy", "limit", "remaining", "reset_ms"],
+  "additionalProperties": false
+}

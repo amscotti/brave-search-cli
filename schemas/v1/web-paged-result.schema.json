@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/web-paged-result.schema.json",
+  "title": "web paged result record (v1)",
+  "description": "One logical web result of a multi-request pagination run as one JSONL result record: the original zero-based position in its own page's upstream web.results array, the user-facing page it came from, and the usable textual members. Records are emitted in deduplicated first-seen order as their pages complete; the exact API-provided URL string is the deduplication identity. Absent members are omitted, never emitted as null.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "web"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "page": {
+      "$comment": "The user-facing page number whose upstream response first carried this result.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "bucket": {
+      "const": "web"
+    },
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "position", "page", "bucket"],
+  "additionalProperties": false
+}

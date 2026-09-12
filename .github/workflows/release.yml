@@ -1,0 +1,570 @@
+# Release publication: an annotated, signature-verified semantic-version tag drives per-platform
+# builds on the exact native runners, platform-matched verification legs that download the
+# packaged artifact, validate its checksums, unpack it, and rerun the binary, and one privileged
+# publisher that runs only after every verification succeeded and publishes the archives, SBOMs,
+# and one aggregate checksum file. Actions are pinned by full commit SHAs; the workflow takes
+# effect automatically once this repository is published on GitHub, and the local Gradle mirrors
+# pin the same packaging contracts in the meantime.
+name: Release
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-and-verify-tag:
+    name: resolve and verify the release tag
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require an annotated, verified tag from a release maintainer and reuse the commit's CI
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: tag
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+              throw new Error(`not a semantic version tag: ${tag}`);
+            }
+            const ref = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `tags/${tag}`,
+            });
+            if (ref.data.object.type !== 'tag') {
+              throw new Error('lightweight tags are rejected: the release tag must be an annotated tag object');
+            }
+            const tagObject = await github.rest.git.getTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_sha: ref.data.object.sha,
+            });
+            const verification = tagObject.data.verification;
+            if (!verification || verification.verified !== true) {
+              throw new Error(
+                'the release tag signature is not verified (reason: ' +
+                (verification && verification.reason) +
+                '); the signing key must be registered to a GitHub account'
+              );
+            }
+            // the release authority is the account that pushed the tag: an annotated tag object
+            // records a human through name, email, and date but carries no account login, and a
+            // verified signature only proves the key is registered to some GitHub account
+            const releaseMaintainers = ['amscotti'];
+            if (!releaseMaintainers.includes(context.actor)) {
+              throw new Error(`tag pusher ${context.actor} is not on the release maintainer allowlist`);
+            }
+            // the tag-target commit is the peeled object sha: the commit being built and the ref
+            // its CI check runs are recorded against
+            if (tagObject.data.object.type !== 'commit') {
+              throw new Error('the release tag must point directly to a commit');
+            }
+            const targetCommitSha = tagObject.data.object.sha;
+            // push workflows expose the target commit as context.sha, not the annotated tag object
+            if (targetCommitSha !== context.sha) {
+              throw new Error('the resolved tag target is not the commit this workflow run was pushed for');
+            }
+            // the target commit's author login is a secondary maintainer restriction: GitHub
+            // enriches repository commits with the account; raw Git database commits have no login
+            const targetCommit = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: targetCommitSha,
+            });
+            const author = targetCommit.data.author && targetCommit.data.author.login;
+            if (!releaseMaintainers.includes(author)) {
+              throw new Error(`tag-target commit author ${author} is not on the release maintainer allowlist`);
+            }
+            const checks = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: targetCommitSha,
+              per_page: 100,
+            });
+            // check runs carry the bare job display names of ci.yml — the job name plus each
+            // matrix label — never a workflow-prefixed form; WorkflowContractTest pins this
+            // list against the ci.yml job names and matrix labels, per leg, no substitutes
+            const requiredChecks = [
+              'jvm-check (macos-26)',
+              'jvm-check (ubuntu-24.04)',
+              'jvm-check (ubuntu-24.04-arm)',
+              'repository hygiene',
+              'native-smoke (macos-26)',
+              'native-smoke (ubuntu-24.04)',
+              'native-smoke (ubuntu-24.04-arm)',
+              'dependency lock state and artifact verification',
+            ];
+            for (const required of requiredChecks) {
+              const green = checks.filter(
+                (check) => check.name === required && check.status === 'completed' && check.conclusion === 'success',
+              );
+              if (green.length === 0) {
+                throw new Error(`required CI check is not green for this commit: ${required}`);
+              }
+            }
+            core.setOutput('version', tag.slice(1));
+
+  build-macos-aarch64:
+    name: build (macos-aarch64)
+    needs: [resolve-and-verify-tag]
+    runs-on: macos-26
+    permissions:
+      contents: read
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Cross-check native-image resolution against the pinned toolchain
+        run: |
+          mise exec -- bash -c '
+            set -euo pipefail
+            "$JAVA_HOME/bin/native-image" --version
+            on_path="$(command -v native-image)"
+            echo "native-image via PATH: $on_path"
+            expected="$JAVA_HOME/bin/native-image"
+            if [ "$(dirname "$on_path")" != "$(dirname "$expected")" ]; then
+              echo "native-image on PATH ($on_path) is outside the pinned toolchain ($expected)" >&2
+              exit 1
+            fi
+          '
+      - name: Assert the host architecture matches the release target
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+      - name: Build the release archive and checksums from the verified tag version
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain -PreleaseVersion="$RELEASE_VERSION" releaseArchive sha256Sums
+      - name: Upload the release directory
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: release-macos-aarch64
+          path: build/release/
+          if-no-files-found: error
+
+  build-linux-x86-64:
+    name: build (linux-x86-64)
+    needs: [resolve-and-verify-tag]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Cross-check native-image resolution against the pinned toolchain
+        run: |
+          mise exec -- bash -c '
+            set -euo pipefail
+            "$JAVA_HOME/bin/native-image" --version
+            on_path="$(command -v native-image)"
+            echo "native-image via PATH: $on_path"
+            expected="$JAVA_HOME/bin/native-image"
+            if [ "$(dirname "$on_path")" != "$(dirname "$expected")" ]; then
+              echo "native-image on PATH ($on_path) is outside the pinned toolchain ($expected)" >&2
+              exit 1
+            fi
+          '
+      - name: Assert the host architecture matches the release target
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+      - name: Build the release archive and checksums from the verified tag version
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain -PreleaseVersion="$RELEASE_VERSION" releaseArchive sha256Sums
+      - name: Upload the release directory
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: release-linux-x86-64
+          path: build/release/
+          if-no-files-found: error
+
+  build-linux-aarch64:
+    name: build (linux-aarch64)
+    needs: [resolve-and-verify-tag]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Cross-check native-image resolution against the pinned toolchain
+        run: |
+          mise exec -- bash -c '
+            set -euo pipefail
+            "$JAVA_HOME/bin/native-image" --version
+            on_path="$(command -v native-image)"
+            echo "native-image via PATH: $on_path"
+            expected="$JAVA_HOME/bin/native-image"
+            if [ "$(dirname "$on_path")" != "$(dirname "$expected")" ]; then
+              echo "native-image on PATH ($on_path) is outside the pinned toolchain ($expected)" >&2
+              exit 1
+            fi
+          '
+      - name: Assert the host architecture matches the release target
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "aarch64"
+      - name: Build the release archive and checksums from the verified tag version
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain -PreleaseVersion="$RELEASE_VERSION" releaseArchive sha256Sums
+      - name: Upload the release directory
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: release-linux-aarch64
+          path: build/release/
+          if-no-files-found: error
+
+  verify-macos-aarch64:
+    name: verify (macos-aarch64)
+    needs: [resolve-and-verify-tag, build-macos-aarch64]
+    runs-on: macos-26
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Download the packaged release directory
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-macos-aarch64
+          path: release
+      - name: Validate checksums before trusting the artifact
+        run: |
+          set -euo pipefail
+          cd release
+          shasum -a 256 -c SHA256SUMS 2>&1 | tee ../verify.log
+      - name: Unpack, rerun the binary, and record evidence
+        run: |
+          set -euo pipefail
+          cd release
+          archive="$(ls brave-search-*.tar.gz)"
+          dir="$(mktemp -d)"
+          tar -xzf "$archive" -C "$dir"
+          bin="$dir/${archive%.tar.gz}/bin/brave-search"
+          test -x "$bin"
+          file "$bin" | tee -a ../verify.log
+          file "$bin" | grep -q 'arm64'
+          "$bin" --version 2>&1 | tee -a ../verify.log
+          "$bin" --version | grep -qx "brave-search $RELEASE_VERSION"
+          "$bin" --definitely-bogus >/dev/null 2>&1 && exit 1 || test $? -ne 0
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: verification-macos-aarch64
+          path: verify.log
+          if-no-files-found: error
+
+  verify-linux-x86-64:
+    name: verify (linux-x86-64)
+    needs: [resolve-and-verify-tag, build-linux-x86-64]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Download the packaged release directory
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-linux-x86-64
+          path: release
+      - name: Validate checksums before trusting the artifact
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c SHA256SUMS 2>&1 | tee ../verify.log
+      - name: Unpack, rerun the binary, and record evidence
+        run: |
+          set -euo pipefail
+          cd release
+          archive="$(ls brave-search-*.tar.gz)"
+          dir="$(mktemp -d)"
+          tar -xzf "$archive" -C "$dir"
+          bin="$dir/${archive%.tar.gz}/bin/brave-search"
+          test -x "$bin"
+          file "$bin" | tee -a ../verify.log
+          file "$bin" | grep -q 'x86-64'
+          "$bin" --version 2>&1 | tee -a ../verify.log
+          "$bin" --version | grep -qx "brave-search $RELEASE_VERSION"
+          "$bin" --definitely-bogus >/dev/null 2>&1 && exit 1 || test $? -ne 0
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: verification-linux-x86-64
+          path: verify.log
+          if-no-files-found: error
+
+  verify-linux-aarch64:
+    name: verify (linux-aarch64)
+    needs: [resolve-and-verify-tag, build-linux-aarch64]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-and-verify-tag.outputs.version }}
+    steps:
+      - name: Download the packaged release directory
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-linux-aarch64
+          path: release
+      - name: Validate checksums before trusting the artifact
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c SHA256SUMS 2>&1 | tee ../verify.log
+      - name: Unpack, rerun the binary, and record evidence
+        run: |
+          set -euo pipefail
+          cd release
+          archive="$(ls brave-search-*.tar.gz)"
+          dir="$(mktemp -d)"
+          tar -xzf "$archive" -C "$dir"
+          bin="$dir/${archive%.tar.gz}/bin/brave-search"
+          test -x "$bin"
+          file "$bin" | tee -a ../verify.log
+          file "$bin" | grep -q 'aarch64'
+          "$bin" --version 2>&1 | tee -a ../verify.log
+          "$bin" --version | grep -qx "brave-search $RELEASE_VERSION"
+          "$bin" --definitely-bogus >/dev/null 2>&1 && exit 1 || test $? -ne 0
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: verification-linux-aarch64
+          path: verify.log
+          if-no-files-found: error
+
+  tamper-drill:
+    name: prove dependency verification end to end
+    needs: [resolve-and-verify-tag]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - name: Assert mise version and the exact Java pin
+        run: |
+          set -euo pipefail
+
+          is_older() {
+            local want="$1" have="$2" i a b
+            local w=() h=()
+            IFS='.' read -r -a w <<<"$want"
+            IFS='.' read -r -a h <<<"$have"
+            for i in 0 1 2; do
+              a="${w[$i]:-0}"
+              b="${h[$i]:-0}"
+              if [ "$b" -lt "$a" ]; then return 0; fi
+              if [ "$b" -gt "$a" ]; then return 1; fi
+            done
+            return 1
+          }
+
+          mise_version="$(mise --version | awk '{print $1}')"
+          echo "mise version: $mise_version"
+          minimum_mise="2026.7.14"
+          if is_older "$minimum_mise" "$mise_version"; then
+            echo "mise $mise_version is older than the required minimum $minimum_mise" >&2
+            exit 1
+          fi
+
+          resolved="$(mise which java)"
+          case "$resolved" in
+            *graalvm-community-25.0.2*)
+              echo "pin OK: $resolved"
+              ;;
+            *)
+              echo "unexpected java resolution: $resolved" >&2
+              exit 1
+              ;;
+          esac
+      - name: Run the tampered-dependency drill against the tagged sources
+        run: env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain dependencyTamperProof
+      - name: Upload drill evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: tamper-drill-evidence
+          path: build/reports/dependency-tamper-proof/evidence.txt
+          if-no-files-found: error
+
+  publish-release:
+    name: publish the verified release
+    needs: [verify-macos-aarch64, verify-linux-x86-64, verify-linux-aarch64, tamper-drill]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    timeout-minutes: 20
+    steps:
+      - name: Download every platform's release directory
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: release
+          pattern: release-*
+      - name: Attest build provenance for the archives
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
+        with:
+          subject-path: release/*/*.tar.gz
+      - name: Publish archives, SBOMs, and one aggregate checksum file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d)"
+          # stage every platform archive and SBOM flat; the per-platform checksum files stay
+          # behind: they are verification inputs whose basenames would collide as release assets
+          cp release/*/*.tar.gz release/*/*.sbom.json "$staging"/
+          # one aggregate checksum file over every published archive and SBOM, sorted by name
+          (
+            cd "$staging"
+            sha256sum -- *.tar.gz *.sbom.json | LC_ALL=C sort -k 2 > SHA256SUMS
+          )
+          # publishing is re-runnable: a transient failure mid-upload leaves the release object
+          # in place with incomplete assets, and a plain recreate would then fail permanently on
+          # "release already exists", so the release is created only when missing and every
+          # asset uploads with --clobber to replace any half-uploaded file wholesale
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            "$staging"/*.tar.gz \
+            "$staging"/*.sbom.json \
+            "$staging"/SHA256SUMS \
+            --clobber

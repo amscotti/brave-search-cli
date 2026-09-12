@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/news-summary.schema.json",
+  "title": "news summary record (v1)",
+  "description": "The terminal record of a successful non-streaming news search: the observed result count, the effective user-facing page and its zero-based upstream offset, the exchange status, and the request identifiers the response offered. Rate-limit windows and usage stay in the JSON envelope's meta, not in JSONL records, so every line stays lean and independently parseable.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "summary"
+    },
+    "command": {
+      "const": "news"
+    },
+    "result_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "page": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "upstream_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 599
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["schema_version", "type", "command", "result_count", "page", "upstream_offset", "http_status"],
+  "additionalProperties": false
+}

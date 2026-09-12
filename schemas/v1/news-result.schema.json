@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/news-result.schema.json",
+  "title": "news result record (v1)",
+  "description": "One logical news search result as one JSONL result record: the original zero-based position in the upstream news.results array, the constant news bucket, and the usable textual members the upstream result carried, including the freshness age. Absent members are omitted, never emitted as null.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "news"
+    },
+    "bucket": {
+      "const": "news"
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "title": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "age": {
+      "$comment": "The freshness member the news endpoint attaches to a result, whatever textual form it carried.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position"],
+  "additionalProperties": false
+}

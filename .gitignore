@@ -1,0 +1,38 @@
+# Secrets are never committed. Real values live only in the local, untracked .env.
+.env
+.env.*
+
+# Committed-by-design secret-free template.
+!.env.example
+
+# Local credential/config files
+*.pem
+*.key
+credentials.json
+
+# Gradle
+.gradle/
+build/
+
+# IDE build output at the repository root
+/out/
+
+# Native image outputs
+native-image-config/
+*.dylib
+*.so
+*.exe
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+#mise
+.mise.local.toml
+
+# gaggle: ignore the review directory
+.review/

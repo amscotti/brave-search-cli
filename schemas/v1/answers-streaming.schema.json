@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-streaming.schema.json",
+  "title": "answers streaming projection (v1)",
+  "description": "The stable projection of one successful streamed answers run inside the buffered JSON envelope's data.projection: the assembled answer text (omitted when the stream offered none), the delta count, and the citation and entity projections in arrival order.",
+  "type": "object",
+  "properties": {
+    "answer": {
+      "$comment": "The concatenation of every emitted text delta; omitted when the stream carried no answer text.",
+      "type": "string"
+    },
+    "delta_count": {
+      "$comment": "The answer_delta runs the stream emitted.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "citation_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "$ref": "answers-stream-citation-projection.schema.json"
+      }
+    },
+    "entity_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "answers-stream-entity-projection.schema.json"
+      }
+    }
+  },
+  "required": ["delta_count", "citation_count", "citations", "entity_count", "entities"],
+  "additionalProperties": false
+}

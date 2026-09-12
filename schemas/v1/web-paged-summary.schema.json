@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/web-paged-summary.schema.json",
+  "title": "web paged summary record (v1)",
+  "description": "The terminal record of a successful multi-request web pagination run: the deduplicated result count, the requested page budget, the pages received, the duplicates removed, and the most recent exchange's status and identifiers. Per-request metadata, including each pacing wait, lives in the JSON envelope's upstream array, not in JSONL records. The single-request page and upstream_offset fields are deliberately absent: with several pages they are ambiguous, and each result record carries its own page provenance.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "summary"
+    },
+    "command": {
+      "const": "web"
+    },
+    "result_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "requested_pages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "received_pages": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "duplicates_removed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 599
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "type",
+    "command",
+    "result_count",
+    "requested_pages",
+    "received_pages",
+    "duplicates_removed",
+    "http_status"
+  ],
+  "additionalProperties": false
+}

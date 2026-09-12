@@ -1,0 +1,7 @@
+Usage: brave-search config unset-key [-hV] [--no-color] [--quiet] [--verbose]
+Remove the stored API key from the config file.
+  -h, --help       Show this help message and exit.
+      --no-color   Disable ANSI color unconditionally; NO_COLOR disables it too.
+      --quiet      Suppress optional diagnostics, never errors.
+  -V, --version    Print version information to stdout and exit.
+      --verbose    Print diagnostics and resolved non-secret metadata to stderr.

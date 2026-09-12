@@ -1,0 +1,21 @@
+{
+  "id": "ans_01",
+  "object": "chat.completion",
+  "created": 1756579200,
+  "model": "brave",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Brave Search is an independent index with its own crawler."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 900,
+    "completion_tokens": 120,
+    "total_tokens": 1020
+  }
+}

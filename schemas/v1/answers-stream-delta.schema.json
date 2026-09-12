@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-delta.schema.json",
+  "title": "answers stream answer_delta record (v1)",
+  "description": "One increment of a streamed answers run: the zero-based sequence of the delta in emission order and the exact text run, so the ordered concatenation of every delta's text is the whole answer text.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "answer_delta"
+    },
+    "command": {
+      "const": "answers"
+    },
+    "sequence": {
+      "$comment": "The zero-based emission ordinal of this delta.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "text": {
+      "$comment": "The exact text run; concatenating every delta's text in sequence order reconstructs the answer.",
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "sequence", "text"],
+  "additionalProperties": false
+}

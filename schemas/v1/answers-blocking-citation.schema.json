@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-blocking-citation.schema.json",
+  "title": "answers blocking citation (v1)",
+  "description": "One citation of a blocking answers response: the members the upstream citation shape documents for the streaming family, each present only when the response offered it, with the url as the one required member.",
+  "type": "object",
+  "properties": {
+    "number": {
+      "$comment": "The citation's ordinal as the response numbered it, zero included.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "url": {
+      "$comment": "The cited source url.",
+      "type": "string",
+      "minLength": 1
+    },
+    "favicon": {
+      "$comment": "The cited source favicon url.",
+      "type": "string"
+    },
+    "snippet": {
+      "$comment": "The cited source snippet.",
+      "type": "string"
+    },
+    "start_index": {
+      "$comment": "The answer-text span the citation anchors, first index.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_index": {
+      "$comment": "The answer-text span the citation anchors, last index.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": ["url"],
+  "additionalProperties": false
+}

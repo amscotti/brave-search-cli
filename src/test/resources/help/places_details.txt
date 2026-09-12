@@ -1,0 +1,26 @@
+Usage: brave-search places details [-hV] [--no-color] [--pretty] [--quiet]
+                                   [--verbose] [--api-version=<apiVersion>]
+                                   [--connect-timeout=<connectTimeout>]
+                                   [-o=<output>] [--timeout=<totalTimeout>]
+                                   ID...
+Fetch photos, web mentions, and profiles of places by their opaque ids.
+      ID...               One or more opaque place ids, up to 200; quote them
+                            and use -- when an id starts like an option.
+      --api-version=<apiVersion>
+                          Pin the Api-Version header to a real calendar date,
+                            YYYY-MM-DD.
+      --connect-timeout=<connectTimeout>
+                          Client connection timeout, for example 10s; default
+                            10s.
+  -h, --help              Show this help message and exit.
+      --no-color          Disable ANSI color unconditionally; NO_COLOR disables
+                            it too.
+  -o, --output=<output>   Output channel: human, json, jsonl, or raw.
+      --pretty            Pretty-print JSON; invalid with jsonl and raw.
+      --quiet             Suppress optional diagnostics, never errors.
+      --timeout=<totalTimeout>
+                          Total non-stream request timeout, for example 30s;
+                            default 30s.
+  -V, --version           Print version information to stdout and exit.
+      --verbose           Print diagnostics and resolved non-secret metadata to
+                            stderr.

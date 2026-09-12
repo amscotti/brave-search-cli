@@ -1,0 +1,7 @@
+{
+  "type": "suggest",
+  "query": {
+    "original": "three word query"
+  },
+  "results": []
+}

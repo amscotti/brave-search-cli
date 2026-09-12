@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-upstream-event-entry.schema.json",
+  "title": "Decoded stream event entry (v1)",
+  "description": "One decoded event of the ordered array a buffered streaming envelope carries in data.upstream: the event's decode ordinal, its kind, and the members its kind carries — the exact text of a text run, the tag name and parsed payload of a documented tag, the name and raw text of an unknown tag, or the framing reason of a passthrough chunk.",
+  "type": "object",
+  "properties": {
+    "event_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "enum": ["text", "tag", "unknown_tag", "passthrough"]
+    },
+    "text": {
+      "$comment": "kind text: the exact text run.",
+      "type": "string"
+    },
+    "tag": {
+      "$comment": "kind tag and unknown_tag: the tag's name.",
+      "type": "string"
+    },
+    "payload": {
+      "$comment": "kind tag: the validated JSON payload, carried as parsed. The decoder guarantees exactly one valid JSON document; the documented tag shapes are unverified upstream, so any JSON value rides here, not only an object."
+    },
+    "raw": {
+      "$comment": "kind unknown_tag: the raw payload text exactly as the stream carried it.",
+      "type": "string"
+    },
+    "reason": {
+      "$comment": "kind passthrough: what the chunk carried instead of answer content — role, tool_calls, finish_reason, empty choices, or no content.",
+      "type": "string"
+    }
+  },
+  "required": ["event_index", "kind"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "kind text carries the exact text run.",
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "text"
+          }
+        }
+      },
+      "then": {
+        "required": ["text"]
+      }
+    },
+    {
+      "$comment": "kind tag carries the tag's name and parsed payload.",
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tag"
+          }
+        }
+      },
+      "then": {
+        "required": ["tag", "payload"]
+      }
+    },
+    {
+      "$comment": "kind unknown_tag carries the tag's name and raw payload text.",
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "unknown_tag"
+          }
+        }
+      },
+      "then": {
+        "required": ["tag", "raw"]
+      }
+    },
+    {
+      "$comment": "kind passthrough carries what the chunk held instead of answer content.",
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "passthrough"
+          }
+        }
+      },
+      "then": {
+        "required": ["reason"]
+      }
+    }
+  ]
+}

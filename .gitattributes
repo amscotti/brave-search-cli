@@ -1,0 +1,28 @@
+# Scripts and text use LF
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.java text
+*.kts text
+*.properties text
+*.toml text
+*.xml text
+*.md text
+*.yml text
+*.yaml text
+*.json text
+*.example text
+*.lock text
+*.editorconfig text
+.gitignore text
+.gitattributes text
+LICENSE text
+
+# Binary artifacts
+*.jar binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.dylib binary
+*.so binary

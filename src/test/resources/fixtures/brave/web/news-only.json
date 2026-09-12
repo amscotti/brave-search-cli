@@ -1,0 +1,13 @@
+{
+  "query": {
+    "original": "news only"
+  },
+  "news": {
+    "results": [
+      {
+        "title": "News Title",
+        "url": "https://example.com/news"
+      }
+    ]
+  }
+}

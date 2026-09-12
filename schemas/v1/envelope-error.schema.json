@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/envelope-error.schema.json",
+  "title": "Error envelope (v1)",
+  "description": "The single compact, LF-terminated JSON document a failed command writes on stdout in JSON mode while diagnostics go to stderr. The error object never carries secrets, raw request headers, stack traces, or internal class names.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "ok": {
+      "const": false
+    },
+    "command": {
+      "$comment": "Canonical dotted subcommand path, for example web, places.search, config.set-key.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "USAGE_ERROR",
+            "LOCAL_CONFIG_ERROR",
+            "AUTHENTICATION_FAILED",
+            "RATE_LIMITED",
+            "TRANSPORT_ERROR",
+            "UPSTREAM_ERROR",
+            "MALFORMED_RESPONSE",
+            "INTERNAL_ERROR",
+            "INTERRUPTED",
+            "TERMINATED"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "upstream_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "null",
+              "$comment": "Detail-free failures keep details null."
+            },
+            {
+              "$comment": "A failed multi-request pagination run reports its page budget and the pages completed before the failure.",
+              "type": "object",
+              "properties": {
+                "requested_pages": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "received_pages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "requested_pages",
+                "received_pages"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "$comment": "A failed multi-request chunk fan-out reports its chunk request budget and the requests completed before the failure.",
+              "type": "object",
+              "properties": {
+                "requested_requests": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "received_requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "requested_requests",
+                "received_requests"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "$comment": "A failed streamed answers run reports the answer deltas emitted and citations seen before the failure, and whether the stream ended without its final usage event.",
+              "type": "object",
+              "properties": {
+                "deltas_emitted": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "citations_seen": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "cost_unknown": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "deltas_emitted",
+                "citations_seen",
+                "cost_unknown"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "upstream_code",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "http_status": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 599
+        },
+        "rate_limits": {
+          "type": "array",
+          "items": {
+            "$ref": "rate-limit.schema.json"
+          }
+        }
+      },
+      "required": [
+        "http_status",
+        "rate_limits"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "ok",
+    "command",
+    "error",
+    "meta"
+  ],
+  "additionalProperties": false
+}

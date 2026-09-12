@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/upstream-entry.schema.json",
+  "title": "Upstream entry (v1)",
+  "description": "One request of a multi-request command invocation, an element of data.upstream's ordered array: the zero-based request index within the invocation, that exchange's metadata, and the lossless decoded body tree. The array-of-entries form is the discriminator of a multi-request invocation; a single-request command emits the bare body value instead.",
+  "type": "object",
+  "properties": {
+    "request_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "meta": {
+      "$comment": "The per-exchange metadata of this one request: the envelope meta members except warnings, plus the optional pacing wait that preceded the request.",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": ["string", "null"]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 599
+        },
+        "api_version": {
+          "type": ["string", "null"]
+        },
+        "rate_limits": {
+          "type": "array",
+          "items": {
+            "$ref": "rate-limit.schema.json"
+          }
+        },
+        "usage": {
+          "oneOf": [
+            {
+              "$ref": "usage.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waited_ms": {
+          "$comment": "Present only when an exhausted rate window paced this request: the whole milliseconds waited for that window's reset before dispatching it.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["request_id", "http_status", "api_version", "rate_limits", "usage"],
+      "additionalProperties": false
+    },
+    "body": {
+      "$comment": "The lossless decoded upstream JSON value of this request's response body."
+    }
+  },
+  "required": ["request_index", "meta", "body"],
+  "additionalProperties": false
+}

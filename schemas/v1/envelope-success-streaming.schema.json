@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/envelope-success-streaming.schema.json",
+  "title": "Streaming success envelope (v1)",
+  "description": "The single compact, LF-terminated JSON document a successful streamed answers run writes on stdout in buffered JSON mode. A streaming exchange has no single JSON body, so data.upstream is the ordered array of decoded stream events — this CLI's own lossless decoding of the SSE body — each entry carrying the event kind and its exact payload, bounded by the buffered-mode accumulation ceiling. data.projection carries the assembled answer and the citation and entity projections; meta.usage carries the usage observed in the final stream events at exact decimal scale; meta.warnings carries the jsonl-is-preferable advisory.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "ok": {
+      "const": true
+    },
+    "command": {
+      "const": "answers"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "projection": {
+          "$comment": "The assembled streaming projection; pinned by answers-streaming.schema.json.",
+          "$ref": "answers-streaming.schema.json"
+        },
+        "upstream": {
+          "$comment": "The ordered array of decoded stream events: one entry per event in decode order. An array whose elements carry event_index and kind is the discriminator of a streaming envelope; it never matches the multi-request upstream-entry form.",
+          "type": "array",
+          "items": {
+            "$ref": "answers-stream-upstream-event-entry.schema.json"
+          }
+        }
+      },
+      "required": ["projection", "upstream"],
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": ["string", "null"]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "api_version": {
+          "type": ["string", "null"]
+        },
+        "rate_limits": {
+          "type": "array",
+          "items": {
+            "$ref": "rate-limit.schema.json"
+          }
+        },
+        "usage": {
+          "oneOf": [
+            {
+              "$ref": "usage.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["request_id", "http_status", "api_version", "rate_limits", "usage", "warnings"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema_version", "ok", "command", "data", "meta"],
+  "additionalProperties": false
+}

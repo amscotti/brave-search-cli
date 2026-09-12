@@ -1,0 +1,31 @@
+{
+  "query": {
+    "original": "three word query"
+  },
+  "web": {
+    "results": [
+      {
+        "title": "First Title",
+        "url": "https://example.com/first",
+        "description": "First description text.",
+        "unknown_result_field": {
+          "score": 0.125
+        }
+      },
+      {
+        "title": "Second Title",
+        "url": "https://example.com/second",
+        "unknown_age": "2026-08-02"
+      },
+      {
+        "title": 42,
+        "url": "https://example.com/third",
+        "description": "Third description."
+      }
+    ]
+  },
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

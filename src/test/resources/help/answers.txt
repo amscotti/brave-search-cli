@@ -1,0 +1,85 @@
+Usage: brave-search answers [-hV] [--[no-]citations] [--[no-]entities]
+                            [--no-color] [--pretty] [--quiet] [--research] [--
+                            [no-]research-thinking] [--[no-]spellcheck] [--[no-]
+                            stream] [--verbose] [--api-version=<apiVersion>]
+                            [--connect-timeout=<connectTimeout>] [--count=<n>]
+                            [--country=<code>] [--freshness=<freshness>]
+                            [--idle-timeout=<duration>] [--language=<tag>]
+                            [--max-completion-tokens=<n>] [--model=<string>]
+                            [-o=<output>] [--page=<1..10>]
+                            [--research-iterations=<1..5>]
+                            [--research-queries=<1..50>]
+                            [--research-results-per-query=<1..60>]
+                            [--research-seconds=<1..300>]
+                            [--research-tokens-per-query=<1024..16384>]
+                            [--safe-search=<safeSearch>] [--search-lang=<tag>]
+                            [--seed=<integer>] [--stream-timeout=<duration>]
+                            [--timeout=<totalTimeout>] [--ui-lang=<tag>]
+                            QUESTION
+Ask one question and print the completed grounded answer.
+      QUESTION              The question to answer; quote it and use -- when it
+                              starts like an option.
+      --api-version=<apiVersion>
+                            Pin the Api-Version header to a real calendar date,
+                              YYYY-MM-DD.
+      --[no-]citations      Ask for citations; enabled citations require
+                              streaming.
+      --connect-timeout=<connectTimeout>
+                            Client connection timeout, for example 10s; default
+                              10s.
+      --count=<n>           Result count within the endpoint's documented range.
+      --country=<code>      Two-letter result country code.
+      --[no-]entities       Ask for entities; enabled entities require
+                              streaming.
+      --freshness=<freshness>
+                            pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD.
+  -h, --help                Show this help message and exit.
+      --idle-timeout=<duration>
+                            The streaming idle deadline; optional, inert for a
+                              blocking answer.
+      --language=<tag>      The result language tag; this endpoint's own
+                              language spelling.
+      --max-completion-tokens=<n>
+                            The completion token budget of the answer.
+      --model=<string>      The answers model; omitted by default so Brave
+                              selects its own.
+      --no-color            Disable ANSI color unconditionally; NO_COLOR
+                              disables it too.
+  -o, --output=<output>     Output channel: human, json, jsonl, or raw.
+      --page=<1..10>        User-facing page; sent as its zero-based offset.
+      --pretty              Pretty-print JSON; invalid with jsonl and raw.
+      --quiet               Suppress optional diagnostics, never errors.
+      --research            Enable the research family; requires streaming.
+      --research-iterations=<1..5>
+                            The research iteration budget; requires --research.
+      --research-queries=<1..50>
+                            The research query budget; requires --research.
+      --research-results-per-query=<1..60>
+                            The research results budget per query; requires
+                              --research.
+      --research-seconds=<1..300>
+                            The research wall-clock budget in seconds; requires
+                              --research.
+      --[no-]research-thinking
+                            Allow the research family to think; requires
+                              --research.
+      --research-tokens-per-query=<1024..16384>
+                            The research token budget per query; requires
+                              --research.
+      --safe-search=<safeSearch>
+                            off, moderate, or strict.
+      --search-lang=<tag>   Result language tag.
+      --seed=<integer>      The seed of the completion.
+      --[no-]spellcheck     Ask upstream to correct the query spelling.
+      --[no-]stream         Stream the answer as it arrives (the default);
+                              --no-stream waits for the completed answer.
+      --stream-timeout=<duration>
+                            The streaming wall-clock deadline; optional, inert
+                              for a blocking answer.
+      --timeout=<totalTimeout>
+                            Total non-stream request timeout, for example 30s;
+                              default 30s.
+      --ui-lang=<tag>       Interface language tag.
+  -V, --version             Print version information to stdout and exit.
+      --verbose             Print diagnostics and resolved non-secret metadata
+                              to stderr.

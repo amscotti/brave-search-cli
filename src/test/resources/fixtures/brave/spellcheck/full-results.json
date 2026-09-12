@@ -1,0 +1,15 @@
+{
+  "type": "spellcheck",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [
+    {
+      "query": "three word corrected query"
+    }
+  ],
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

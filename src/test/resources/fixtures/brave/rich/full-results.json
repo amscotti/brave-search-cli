@@ -1,0 +1,52 @@
+{
+  "type": "rich",
+  "query": {
+    "original": "three word query"
+  },
+  "videos": [
+    {
+      "title": "First Provider Video",
+      "url": "https://videos.example.com/first",
+      "description": "First provider video description.",
+      "source": "Example Video Provider",
+      "unknown_item_field": {
+        "score": 0.5
+      }
+    },
+    {
+      "title": "Second Provider Video",
+      "url": "https://videos.example.com/second",
+      "source": "Example Video Provider"
+    }
+  ],
+  "images": [
+    {
+      "title": "Provider Image",
+      "url": "https://images.example.com/one",
+      "source": "Example Image Provider"
+    },
+    {
+      "title": 42
+    }
+  ],
+  "faqs": [
+    {
+      "title": "What is a rich callback?",
+      "url": "https://example.com/faq",
+      "description": "A reference to real-time rich results of an earlier web search.",
+      "source": "Example FAQ Provider"
+    }
+  ],
+  "future_widgets": [
+    {
+      "widget": "one"
+    },
+    {
+      "widget": "two"
+    }
+  ],
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}

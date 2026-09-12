@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/usage.schema.json",
+  "title": "Answers usage (v1)",
+  "description": "Answers request, query, and token counters with exact-scale decimal costs; every counter and cost is null when the upstream did not report it, and unknown preserves unrecognized X-Request-* header names verbatim in first-seen order.",
+  "type": "object",
+  "properties": {
+    "requests": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "queries": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "tokens_in": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "tokens_out": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "requests_cost": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "queries_cost": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "tokens_in_cost": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "tokens_out_cost": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "total_cost": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "unknown": {
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "requests",
+    "queries",
+    "tokens_in",
+    "tokens_out",
+    "requests_cost",
+    "queries_cost",
+    "tokens_in_cost",
+    "tokens_out_cost",
+    "total_cost",
+    "unknown"
+  ],
+  "additionalProperties": false
+}

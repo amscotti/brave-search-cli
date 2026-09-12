@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/context-result.schema.json",
+  "title": "context result record (v1)",
+  "description": "The whole LLM context document as one JSONL result record: the constant context bucket and the joined passage text of the usable grounding.generic entries. The context is a single logical result, so one exchange emits exactly one record of this shape; an exchange with no usable passage emits no record at all. Absent members are omitted, never emitted as null.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "context"
+    },
+    "bucket": {
+      "const": "context"
+    },
+    "content": {
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket"],
+  "additionalProperties": false
+}

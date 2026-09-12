@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/places-result.schema.json",
+  "title": "places result record (v1)",
+  "description": "One logical place as one JSONL result record: the bucket the entry was enumerated from — the wire word that named its response array — the entry's original zero-based position inside that bucket, the opaque upstream place id, and the usable textual members the entry carried: title, address, rating value and count, distance, and the phone and website contact lines. Absent members are omitted, never emitted as null; every upstream member outside this inventory is deliberately not carried because the listing renders only what it can show, and the mixed ordering hints are ignored because enumeration follows the documented bucket order.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "result"
+    },
+    "command": {
+      "const": "places.search"
+    },
+    "bucket": {
+      "$comment": "The response bucket the entry was enumerated from; the place search response documents exactly these seven.",
+      "enum": ["results", "cities", "countries", "regions", "neighborhoods", "addresses", "streets"]
+    },
+    "position": {
+      "$comment": "The entry's original zero-based position inside its own bucket's array.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "id": {
+      "$comment": "The opaque, ephemeral upstream place id, interchangeable with web search location result ids; never validated for internal format.",
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "rating_value": {
+      "type": "string"
+    },
+    "rating_count": {
+      "type": "string"
+    },
+    "distance": {
+      "type": "string"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "website": {
+      "type": "string"
+    }
+  },
+  "required": ["schema_version", "type", "command", "bucket", "position"],
+  "additionalProperties": false
+}

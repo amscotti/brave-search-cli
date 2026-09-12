@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/answers-stream-citation-projection.schema.json",
+  "title": "answers stream citation projection (v1)",
+  "description": "One citation of a streamed answers run inside the buffered JSON envelope's projection: the projected members of the citation tag's payload, each present only when the payload offered it. Unlike the blocking form, the url is optional here — a streamed citation is projected on arrival, and dropping a url-less one would desynchronize the citation count the projection reports.",
+  "type": "object",
+  "properties": {
+    "number": {
+      "$comment": "The citation's ordinal as the payload numbered it, zero included.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "url": {
+      "type": "string"
+    },
+    "favicon": {
+      "type": "string"
+    },
+    "snippet": {
+      "type": "string"
+    },
+    "start_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "end_index": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

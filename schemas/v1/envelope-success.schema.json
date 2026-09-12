@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brave-search-cli.invalid/schemas/v1/envelope-success.schema.json",
+  "title": "Success envelope (v1)",
+  "description": "The single compact, LF-terminated JSON document a successful command writes on stdout in JSON mode. data.projection holds the stable local fields; data.upstream holds the lossless decoded upstream tree. command is the canonical dotted subcommand path used for dispatch.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "ok": {
+      "const": true
+    },
+    "command": {
+      "$comment": "Canonical dotted subcommand path, for example web, places.search, config.set-key.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "projection": {
+          "$comment": "Stable local fields owned by this CLI; per-command schemas pin these fields.",
+          "type": "object"
+        },
+        "upstream": {
+          "$comment": "The lossless upstream payload: a single-request command emits the bare decoded body value — any JSON value that is not a non-empty array of upstream entries, an empty array body included; a multi-request command emits the ordered array of upstream-entry objects, which is the discriminator of a multi-request invocation.",
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "upstream-entry.schema.json"
+              }
+            },
+            {
+              "not": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "upstream-entry.schema.json"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": ["projection", "upstream"],
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": ["string", "null"]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 599
+        },
+        "api_version": {
+          "type": ["string", "null"]
+        },
+        "rate_limits": {
+          "type": "array",
+          "items": {
+            "$ref": "rate-limit.schema.json"
+          }
+        },
+        "usage": {
+          "oneOf": [
+            {
+              "$ref": "usage.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "$comment": "Advisories owned by JSON mode; raw and human modes route them to stderr.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["request_id", "http_status", "api_version", "rate_limits", "usage", "warnings"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema_version", "ok", "command", "data", "meta"],
+  "additionalProperties": false
+}

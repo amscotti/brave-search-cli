@@ -1,0 +1,41 @@
+{
+  "type": "images",
+  "query": {
+    "original": "three word query"
+  },
+  "results": [
+    {
+      "type": "image_result",
+      "title": "First Image",
+      "url": "https://example.com/first",
+      "image": "https://images.example.com/first-full.jpg",
+      "thumbnail": "https://images.example.com/first-thumb.jpg",
+      "dimension": {
+        "width": 1200,
+        "height": 800
+      },
+      "unknown_result_field": {
+        "score": 0.125
+      }
+    },
+    {
+      "type": "image_result",
+      "title": "Second Image",
+      "url": "https://example.com/second",
+      "image": "https://images.example.com/second-full.jpg"
+    },
+    {
+      "type": "image_result",
+      "title": 42,
+      "url": "https://example.com/third",
+      "image": "https://images.example.com/third-full.jpg"
+    }
+  ],
+  "extra": {
+    "might_be_offensive": false
+  },
+  "unknown_future_block": {
+    "cost": 1.10,
+    "long": 0.1000000000000000000001
+  }
+}
