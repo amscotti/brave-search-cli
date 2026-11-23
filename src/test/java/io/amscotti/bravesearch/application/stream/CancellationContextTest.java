@@ -70,14 +70,60 @@ final class CancellationContextTest {
     }
 
     @Test
-    void exitCodeMapping() {
-        assertEquals(130, CancellationContext.Cause.SIGINT.exitCode(), "SIGINT maps to the shell's 130");
-        assertEquals(0, CancellationContext.Cause.BROKEN_PIPE.exitCode(), "broken pipe is a normal end of stream");
-        assertEquals(0, CancellationContext.Cause.CLOSED.exitCode(), "a closed stream is a normal completion");
-        assertEquals(6, CancellationContext.Cause.IDLE_TIMEOUT.exitCode(), "idle timeout maps to the stream-failure code");
-        assertEquals(6, CancellationContext.Cause.WALL_TIMEOUT.exitCode(), "wall-clock timeout maps to the stream-failure code");
-        assertEquals(6, CancellationContext.Cause.SUBSCRIBER_FAILURE.exitCode(), "subscriber failure maps to the stream-failure code");
-        assertEquals(6, CancellationContext.Cause.TRANSPORT_FAILURE.exitCode(), "transport failure maps to the stream-failure code");
+    void awaitReturnsOnceTheFirstCauseLatches() throws InterruptedException {
+        CancellationContext context = new CancellationContext();
+        CountDownLatch parked = new CountDownLatch(1);
+        CountDownLatch returned = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean(false);
+        Thread waiter = new Thread(() -> {
+            parked.countDown();
+            try {
+                context.await();
+                returned.countDown();
+            } catch (InterruptedException unexpected) {
+                interrupted.set(true);
+            }
+        });
+        waiter.start();
+
+        assertTrue(parked.await(5, TimeUnit.SECONDS), "waiter must reach await");
+        Thread.sleep(100);
+        assertEquals(1, returned.getCount(), "await must park while nothing is latched");
+
+        context.latch(CancellationContext.Cause.SIGINT);
+
+        assertTrue(returned.await(5, TimeUnit.SECONDS), "the first latch releases the waiter");
+        assertFalse(interrupted.get(), "a latch is a return, never an interrupt");
+    }
+
+    @Test
+    void anInterruptEndsAwaitByThrowingAndLatchesNothing() throws InterruptedException {
+        CancellationContext context = new CancellationContext();
+        CountDownLatch parked = new CountDownLatch(1);
+        AtomicBoolean endedByInterrupt = new AtomicBoolean(false);
+        AtomicBoolean returnedNormally = new AtomicBoolean(false);
+        Thread waiter = new Thread(() -> {
+            parked.countDown();
+            try {
+                context.await();
+                returnedNormally.set(true);
+            } catch (InterruptedException interrupted) {
+                // the checked wait hands the interrupt to its caller as the exception
+                endedByInterrupt.set(true);
+            }
+        });
+        waiter.start();
+
+        assertTrue(parked.await(5, TimeUnit.SECONDS), "waiter must reach await");
+        waiter.interrupt();
+        waiter.join(TimeUnit.SECONDS.toMillis(5));
+
+        assertFalse(waiter.isAlive(), "the interrupt ends the wait");
+        assertTrue(endedByInterrupt.get(), "the wait ended by the interrupt, thrown to its caller");
+        assertFalse(returnedNormally.get(), "an interrupt is never mistaken for a latch");
+        assertTrue(context.cause().isEmpty(), "an interrupt latches nothing");
+        // the latch still works afterwards: the interrupt retired one waiter, not the context
+        assertTrue(context.latch(CancellationContext.Cause.SIGINT));
     }
 
     @Test

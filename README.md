@@ -98,6 +98,25 @@ nonblank, and absolute, and otherwise at
 with owner-only permissions. The full contract is
 [docs/config-security.md](docs/config-security.md).
 
+## Proxy
+
+Remote exchanges honor the standard proxy variables. Set `HTTPS_PROXY` (or
+`https_proxy`) and every request to the Brave API travels through that proxy;
+`NO_PROXY` (or `no_proxy`), a comma-separated list of hosts or domains, names the
+origins reached directly. A loopback origin is never proxied.
+
+Only plain HTTP proxies are supported: the client tunnels each HTTPS request
+through the proxy and never authenticates to the proxy itself. Any other value —
+`socks5://…`, `https://…`, or an address carrying a user name and password — is a
+configuration error (exit `3`) that names the rule and never the value. The API key
+stays sealed inside the request's own TLS session, exactly as on a direct
+connection.
+
+```console
+# illustrative: routes the exchange through a corporate proxy
+$ HTTPS_PROXY=http://proxy.internal:3128 brave-search web "heat pump efficiency"
+```
+
 ## Examples
 
 Quote queries. Use `--` when a query starts like an option. Every command's

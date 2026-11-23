@@ -21,8 +21,8 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
-import io.amscotti.bravesearch.application.port.out.ImageSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.ImageSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
@@ -73,7 +73,7 @@ final class ImageSearchCommandTest {
                 "--no-spellcheck",
                 "three word query");
 
-        ImageSearchDispatch dispatched = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<ImageSearchRequest> dispatched = harness.exchange.dispatches.getFirst();
         ImageSearchRequest request = dispatched.request();
         assertEquals("three word query", request.query());
         assertEquals("ALL", request.country());
@@ -257,13 +257,13 @@ final class ImageSearchCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements ImageSearchExchange {
-        final List<ImageSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<ImageSearchRequest, ImageSearchResult> {
+        final List<RemoteDispatch<ImageSearchRequest>> dispatches = new ArrayList<>();
         Outcome<ImageSearchResult> outcome = new Outcome.Success<>(
                 new ImageSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<ImageSearchResult> dispatch(ImageSearchDispatch invocation) {
+        public Outcome<ImageSearchResult> dispatch(RemoteDispatch<ImageSearchRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

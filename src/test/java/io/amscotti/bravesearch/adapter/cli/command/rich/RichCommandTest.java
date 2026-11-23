@@ -19,9 +19,9 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.RichDispatch;
-import io.amscotti.bravesearch.application.port.out.RichExchange;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
@@ -202,13 +202,13 @@ final class RichCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements RichExchange {
-        final List<RichDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<RichRequest, RichResult> {
+        final List<RemoteDispatch<RichRequest>> dispatches = new ArrayList<>();
         Outcome<RichResult> outcome =
                 new Outcome.Success<>(new RichResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<RichResult> dispatch(RichDispatch invocation) {
+        public Outcome<RichResult> dispatch(RemoteDispatch<RichRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

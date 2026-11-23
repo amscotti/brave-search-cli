@@ -29,13 +29,21 @@ upstream work, stays silent, and exits `0`. Every other output-write failure exi
 SIGINT and SIGTERM each latch their signal's cause on every live run through the same
 process handler and exit by their conventional statuses, 130 and 143, on both the JVM and
 native executables; a signal arriving while no run is live terminates the process itself with
-that same conventional status, so no user signal is ever absorbed. Exit-code meanings are
+that same conventional status, so no user signal is ever absorbed. A signal repeated while
+the run it latched is still winding down terminates the process at once with that same
+status — the user has asked twice — while a different signal arriving during that wind-down
+only latches, because the first cause decides the run's status. Exit-code meanings are
 stable within CLI major version 1.
 
 An unexpected internal error — a crash no layer classified — prints exactly one redacted
 stderr line, `brave-search: unexpected internal error (<exception simple name>)`, and exits
 `70`: no stack trace, no internal class names beyond the exception's own simple name, and no
-message text that could quote user input or credential material.
+message text that could quote user input or credential material. That is the whole report unless the process opted into a trace:
+with `BRAVE_SEARCH_DEBUG` set to any nonblank value other than `0` or `false`, the same line
+is followed by a trace of stack frames and exception types —
+`brave-search: debug trace, exception messages withheld: <exception simple name>` — which
+never carries an exception message, because a message can quote user input or credential
+material. The opt-in changes the report, never the status.
 
 ## Failure precedence
 
@@ -131,6 +139,25 @@ is a usage error naming the flag. Together these pin the durability guarantee fo
 that happened to be unique cannot silently re-target a longer name, an unknown option
 cannot hide inside a positional, and a duplicated scalar cannot quietly resolve to its last
 value.
+
+### Proxy variables
+
+A remote exchange honors the standard proxy variables, read through the one
+environment seam the configuration adapter owns: `HTTPS_PROXY` (or `https_proxy`)
+names an upstream HTTP proxy, and `NO_PROXY` (or `no_proxy`) is a comma-separated
+list of the origins reached directly — a host, a domain together with its
+subdomains, an entry with a leading dot, or `*` for every origin. The uppercase
+spelling wins over the lowercase one, an unset or blank proxy variable means a
+direct connection, and the proxy is resolved when a run opens its exchange, so a
+command that makes no exchange never consults it.
+
+Two rules are fixed. A loopback origin — a `--base-url` override — is never
+proxied. And only plain HTTP proxies are honored: the client tunnels an HTTPS
+request through the proxy and never authenticates to the proxy itself, so
+`socks5://…`, `https://…`, an address carrying a user name and password, or an
+unparsable address is a configuration error (exit `3`) whose one diagnostic names
+the rule and never the value, because a proxy address may carry credentials. The
+subscription token is sealed inside the request's own TLS session on either route.
 
 ## Output modes
 
@@ -470,6 +497,22 @@ human and raw diagnose once on stderr (raw additionally emits the bounded upstre
 byte-exactly when one exists), json writes exactly one `ok:false` envelope on stdout plus the
 human diagnostic on stderr, and jsonl ends the stream with one `error` record whose message is
 the whole explanation. `error.retryable` is true exactly for rate-limited failures.
+
+The human diagnostic is written for a person. For the failures a reader can act on it says
+what happened in plain words and what to do next, naming the observed status and upstream
+code; every other failure keeps the transport's fixed diagnostic.
+
+| Failure | Human diagnostic after the command prefix |
+| ------- | ------------------------------------------ |
+| Rejected key (401, or an auth-bearing 422) | `the Brave API rejected the API key (HTTP 422, code SUBSCRIPTION_TOKEN_INVALID); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'` |
+| Plan refuses the request (403, or a payment/subscription/entitlement code) | `the API key's plan does not allow this request (HTTP 403); review the plan in the Brave Search API dashboard` |
+| Rate limited | `the Brave API rate limit was reached (HTTP 429); retry after 42s` — the longest reset among the exhausted windows; `retry after a short wait` when no exhausted window was observed |
+| Endpoint outside the plan | `the API key's plan does not include this endpoint (HTTP 400, code OPTION_NOT_IN_PLAN)` |
+
+Only the stderr line carries the advice: the machine documents keep their fixed `message`,
+so a script's parsing never depends on a sentence. An upstream code is echoed only when it
+is a plain identifier, because stderr is a raw terminal stream. A walk appends its counts to
+whichever sentence it renders.
 
 ## News command
 
@@ -1090,7 +1133,12 @@ goggle family are unknown options here.
   snapshot is inspected, and a window with remaining 0 paces the next chunk behind a
   cancellable wait that runs until that window's reset instant — anchored at the
   observation of its headers, so only the reset still outstanding at wait start is waited —
-  and the paced request reports `waited_ms` in the JSON envelope's upstream entry.
+  and the paced request reports `waited_ms` in the JSON envelope's upstream entry. Each
+  wait is announced on stderr before it happens as `places details: waiting <time> for
+  the rate-limit window to reset before request <n>` (always in the human mode, under
+  `--verbose` in a machine mode, never under `--quiet`), and a wait
+  whose outstanding reset exceeds one minute is refused: the run ends as a rate-limited
+  failure (exit `5`) naming the outstanding time and the completed requests.
 - **Order reconstruction:** duplicate input ids are preserved and the input order is
   reconstructed by matching returned ids: a returned id fills every input position
   that carries it, and a missing or expired id keeps its original position as a
@@ -1398,14 +1446,24 @@ wait spans only the reset still outstanding when it starts, and a reset the prev
 body read already outlived waits nothing. The wait performed is exposed as `waited_ms` on
 that request's upstream entry.
 
+Every wait is announced before it happens, on stderr, as
+`<command>: waiting <time> for the rate-limit window to reset before page <n>` (whole
+seconds as `2s`, finer as `1500 ms`). The announcement follows the channel conventions:
+the human mode always hears it, and a machine mode hears it only under `--verbose`, so a
+machine stream stays exactly what its schema says; `--quiet` silences it everywhere. A
+wait is also bounded: when the outstanding reset exceeds one minute, the walk
+refuses it and ends as a rate-limited failure (exit `5`) whose diagnostic names the
+outstanding time and the completed pages. An exhausted monthly window therefore costs a
+verdict, never a month of silence.
+
 Interruption: a walk interrupted by SIGINT ends as its mode's transport-failure document —
 human's one stderr diagnostic and json's `ok:false` envelope carry the completed-page
 counts, jsonl ends its already-streamed records in the counted `error` record — while the
 process itself exits `130` by the run's cancellation latch, which is authoritative over the
 rendered failure kind. The interrupt is observed at the walk's cancellation points: before
 each subsequent request and inside every pacing slice, so a pacing wait ends within a
-slice. An in-flight request's body read is not interrupted mid-read; the walk observes the
-latch at the cancellation point after that page completes. A downstream consumer closing the
+slice. An in-flight request is ended by the latch as well: the transport closes the body the
+moment the latch fires, so that page fails as cancelled instead of running out its budget. A downstream consumer closing the
 pipe during the walk — the `head -1` over a paged JSONL stream — is the documented silent
 early termination: the run latches the broken-pipe cause, writes nothing further, and exits
 `0`; any other output-write failure during the walk keeps the transport status (exit 6)

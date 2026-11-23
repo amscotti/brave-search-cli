@@ -3,7 +3,6 @@ package io.amscotti.bravesearch.adapter.bravehttp;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
@@ -47,7 +46,9 @@ final class BraveHttpTransportLifecycleTest {
 
     @Test
     @Timeout(value = 20, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
-    void closeDuringAnExchangeWaitsForItsCompletion() throws Exception {
+    void closeDuringAnExchangeEndsItAsCancelledAndReturnsAtOnce() throws Exception {
+        // a stalled exchange must not hold a closing library open until its budget runs out:
+        // the close ends the exchange and lands at once
         GatedClient gated = new GatedClient();
         try (BraveHttpTransport transport = new BraveHttpTransport(
                 gated, GENEROUS_HEADERS_TIMEOUT, ResponseLimits.production(), Clock.systemUTC())) {
@@ -62,32 +63,31 @@ final class BraveHttpTransportLifecycleTest {
             sending.start();
             assertTrue(gated.entered.await(10, TimeUnit.SECONDS), "the gated client holds the exchange");
 
-            AtomicBoolean closeReturned = new AtomicBoolean(false);
-            Thread closing = Thread.ofPlatform().unstarted(() -> {
-                transport.close();
-                closeReturned.set(true);
-            });
-            closing.start();
-            closing.join(300);
-            assertTrue(closing.isAlive(), "closing waits for the in-flight exchange");
-
-            gated.released.countDown();
+            long startedAt = System.nanoTime();
+            transport.close();
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
             sending.join(10_000);
-            closing.join(10_000);
-            assertTrue(closeReturned.get(), "the close lands after the exchange completes");
-            assertTrue(gated.clientClosed.get(), "the owned client is closed exactly once the exchange is done");
-            assertInstanceOf(
-                    Outcome.Success.class, outcome.get(), "the in-flight exchange is never severed by the close");
 
-            Outcome<BraveHttpResponse> after = transport.send(request());
-            assertInstanceOf(Outcome.Failure.class, after, "sends after the close stay closed");
+            assertTrue(elapsedMs < 5_000, "the close does not wait out the exchange: " + elapsedMs + " ms");
+            assertFalse(sending.isAlive(), "the in-flight exchange is ended by the close");
+            Outcome.Failure<BraveHttpResponse> ended = (Outcome.Failure<BraveHttpResponse>) outcome.get();
+            assertEquals(FailureKind.TRANSPORT, ended.kind(), "an exchange the close took away is a cancelled one");
+            assertEquals("upstream exchange cancelled", ended.diagnostic());
+            assertTrue(gated.clientClosed.get(), "the owned client is closed by the close");
+        } finally {
+            gated.released.countDown();
+        }
+        // after a close, a further exchange learns the closed client without dispatching
+        BraveHttpTransport closed = new BraveHttpTransport(
+                gated, GENEROUS_HEADERS_TIMEOUT, ResponseLimits.production(), Clock.systemUTC());
+        closed.close();
+        Outcome<BraveHttpResponse> after = closed.send(request());
             Outcome.Failure<BraveHttpResponse> failure = (Outcome.Failure<BraveHttpResponse>) after;
             assertEquals(FailureKind.INTERNAL, failure.kind());
             assertEquals("the HTTP client has been closed", failure.diagnostic());
             assertFalse(
                     failure.diagnostic().contains("sentinel"),
                     "the closed diagnostic carries no credential material");
-        }
     }
 
     private static BraveApiRequest request() {

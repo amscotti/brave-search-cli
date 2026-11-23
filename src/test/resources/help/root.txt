@@ -19,3 +19,6 @@ Commands:
   rich        Fetch the current rich results of one web search callback key.
   answers     Ask one question and print the completed grounded answer.
   completion  Print a shell completion script for bash or zsh to stdout.
+Run 'brave-search <command> --help' for a command's options. Scripts and
+agents: give each remote command an explicit json or jsonl output mode, and
+decide on the exit code before reading the document.

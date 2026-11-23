@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpPlaceSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceSearchEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlacesSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.places.PlacesProjectionE
 import io.amscotti.bravesearch.adapter.cli.presentation.places.PlacesSearchPresenterImpl;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.PlaceSearchExchange;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.PlaceSearchRequest;
+import io.amscotti.bravesearch.domain.result.PlaceSearchResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -35,7 +33,7 @@ import java.util.function.Function;
  * cancellation registry here: one invocation is exactly one GET exchange.
  */
 public record PlacesComposition(
-        CredentialProvider loopbackTestToken, PlaceSearchExchange exchange, PlacesSearchPresenter presenter) {
+        CredentialProvider loopbackTestToken, RemoteExchange<PlaceSearchRequest, PlaceSearchResult> exchange, PlacesSearchPresenter presenter) {
 
     public PlacesComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -48,27 +46,17 @@ public record PlacesComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
     static PlacesComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        PlaceSearchExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpPlaceSearchGateway gateway = new BraveHttpPlaceSearchGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static PlacesComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<PlaceSearchRequest, PlaceSearchResult> exchange =
+                RemoteExchanges.blocking(PlaceSearchEndpoint::assemble, PlaceSearchResult::new, environmentLookup);
         return new PlacesComposition(loopbackTestToken, exchange, presenter(mappers, jsonl));
     }
 

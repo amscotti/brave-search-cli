@@ -95,16 +95,22 @@ of the layer that proves it, and no later piece exists before its earlier piece 
 
 1. **Request** — the immutable `domain.request` value with every documented bound enforced
    at construction (a usage error, never a wire value), pinned by its unit test.
-2. **Port** — the outbound `application.port.out` interface and its exchange/dispatch
-   records if the endpoint adds a new exchange shape; existing shapes are reused as-is.
+2. **Port** — the endpoint's outbound interface in `application.port.out`. The remote
+   exchange shapes are endpoint-generic and reused as-is: a command dispatches a
+   `RemoteDispatch<Req>` through a `RemoteExchange<Req, Res>`, and a sequential run opens
+   that exchange's walk form. Only an endpoint with a genuinely new interaction adds its
+   own shape.
 3. **Endpoint** — the `adapter.bravehttp.endpoint` translation: query serialization, header
    assembly, the GET/POST rule. Pinned by an endpoint test against `ScriptedSseServer`
    asserting the exact encoded URI and headers.
-4. **Gateway** — the port's concrete implementation over the shared transport, classified
-   failures and bounded bodies included.
-5. **Composition wiring** — a bootstrap composition record plus its registration in
-   `Main`, and the same gateway handed to `api.internal.Assembler` when the endpoint belongs
-   to the library surface; only composition roots instantiate adapters.
+4. **Gateway** — nothing to write: the one `BraveHttpBlockingGateway` is bound to the
+   endpoint's `assemble` and its result record's constructor, which is all an endpoint
+   contributes; credential routing, budgets, classified failures, and bounded bodies are
+   the gateway's and already proven by its own suite.
+5. **Composition wiring** — a bootstrap composition record and its line in
+   `Compositions` (which builds every composition over one shared codec set), and the
+   endpoint's port bound to the generic gateway in `api.internal.Assembler` when the
+   endpoint belongs to the library surface; only composition roots instantiate adapters.
 6. **Command and option guard** — the `adapter.cli.command` declaration mixing in
    `GlobalOptions`, `RemoteOptions`, and `CommonSearchOptions`; where the endpoint documents
    only a subset of the shared grammar, the complement guard

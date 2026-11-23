@@ -83,7 +83,7 @@ final class ContextCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, webComposition(), context)
+            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webComposition()).withContext(context))
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

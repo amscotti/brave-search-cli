@@ -30,9 +30,9 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.WebSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.WebSearchExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
@@ -40,6 +40,8 @@ import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.goggles.Goggle;
+import io.amscotti.bravesearch.domain.metadata.RateLimitSnapshot;
+import io.amscotti.bravesearch.domain.metadata.RateLimitWindow;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
 import io.amscotti.bravesearch.domain.output.OutputMode;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
@@ -56,6 +58,7 @@ import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -188,7 +191,7 @@ final class WebSearchCommandTest {
         Harness.RunResult result = harness.run("web", "q");
 
         assertEquals(0, result.exitCode(), () -> result.describe());
-        WebSearchDispatch dispatch = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<WebSearchRequest> dispatch = harness.exchange.dispatches.getFirst();
         assertEquals(WebSearchRequest.builder("q").build(), dispatch.request());
         assertEquals(BraveApiOrigin.production(), dispatch.origin());
         assertTrue(dispatch.origin().credentialsAllowed(), "the default origin is the production origin");
@@ -206,7 +209,7 @@ final class WebSearchCommandTest {
                 "web", "--timeout", "5s", "--connect-timeout", "250ms", "--api-version", "2024-06-01", "q");
 
         assertEquals(0, result.exitCode(), () -> result.describe());
-        WebSearchDispatch dispatch = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<WebSearchRequest> dispatch = harness.exchange.dispatches.getFirst();
         assertEquals(Duration.ofSeconds(5), dispatch.totalTimeout());
         assertEquals(Duration.ofMillis(250), dispatch.connectTimeout());
         assertEquals("2024-06-01", dispatch.pinnedApiVersion());
@@ -278,6 +281,60 @@ final class WebSearchCommandTest {
         assertEquals(10, run.requestedPages(), "the default page budget is the documented maximum");
         assertEquals(2, run.receivedPages());
         assertEquals(2, harness.recordingPaged.observedPages.size(), "every completed page reaches the page observer");
+    }
+
+    @Test
+    void aPacingWaitIsAnnouncedOnStderrForHumansAndVerboseRunsAndQuietSilencesIt() {
+        Harness shared = new Harness();
+        shared.waiter = new PaginationService.RateWaiter() {
+
+            @Override
+            public Duration outstandingUntil(Instant resetAt) {
+                return Duration.ofMillis(1500);
+            }
+
+            @Override
+            public Duration await(Instant resetAt, CancellationContext cancellation) {
+                return Duration.ZERO;
+            }
+        };
+        String announcement = "web: waiting 1500 ms for the rate-limit window to reset before page 2\n";
+        Harness human = pacedHarness(shared.waiter);
+        Harness quiet = pacedHarness(shared.waiter);
+        Harness jsonl = pacedHarness(shared.waiter);
+        Harness verboseJsonl = pacedHarness(shared.waiter);
+
+        Harness.RunResult heard = human.run("web", "--all-pages", "q");
+        Harness.RunResult silent = quiet.run("web", "--all-pages", "--quiet", "q");
+        Harness.RunResult machine = jsonl.run("web", "--all-pages", "--output", "jsonl", "q");
+        Harness.RunResult verbose = verboseJsonl.run("web", "--all-pages", "--output", "jsonl", "--verbose", "q");
+
+        assertEquals(0, heard.exitCode(), () -> heard.describe());
+        assertEquals(2, human.exchange.dispatches.size(), "the announced wait paces the walk, it does not end it");
+        assertEquals(announcement, heard.stderr(), "the human mode hears the wait before it happens");
+        assertEquals(0, silent.exitCode(), () -> silent.describe());
+        assertEquals("", silent.stderr(), "--quiet silences the announcement");
+        assertEquals(0, machine.exitCode(), () -> machine.describe());
+        assertEquals("", machine.stderr(), "a machine mode keeps stderr empty: its stream is the whole story");
+        assertEquals(0, verbose.exitCode(), () -> verbose.describe());
+        assertEquals(announcement, verbose.stderr(), "--verbose carries the announcement into a machine mode");
+    }
+
+    /** A walk whose first page reports an exhausted window, then a final page. */
+    private static Harness pacedHarness(PaginationService.RateWaiter waiter) {
+        Harness harness = new Harness();
+        harness.waiter = waiter;
+        harness.exchange.enqueue(new Outcome.Success<>(new WebSearchResult(
+                200,
+                new UpstreamPayload("{\"query\":{\"more_results_available\":true},\"web\":{\"results\":[]}}"
+                        .getBytes(UTF_8)),
+                new RateLimitSnapshot(
+                        List.of(new RateLimitWindow("request", 1, 0, Duration.ofSeconds(2))), List.of(), Instant.EPOCH),
+                null,
+                null,
+                null)));
+        harness.exchange.enqueue(pageOutcome(200, "{\"query\":{\"more_results_available\":false}}"));
+        return harness;
     }
 
     @Test
@@ -734,6 +791,36 @@ final class WebSearchCommandTest {
     }
 
     @Test
+    void aMissingCredentialLineSaysHowToStoreOne() {
+        Harness harness = new Harness();
+        harness.stored.failure = CredentialResolutionException.missing("environment BRAVE_API_KEY");
+
+        Harness.RunResult result = harness.run("web", "q");
+
+        assertEquals(3, result.exitCode(), () -> result.describe());
+        assertEquals(
+                "web: missing credential: none of environment BRAVE_API_KEY provided one; "
+                        + "store one with 'brave-search config set-key'\n",
+                result.stderr(),
+                "the line names what to do, as the rejected-key line does");
+        assertEquals("", result.stdout(), () -> result.describe());
+    }
+
+    @Test
+    void anUnsetTestVariableLineKeepsItsOwnMeaningWithoutTheStoreAdvice() {
+        Harness harness = new Harness();
+        harness.stored.failure = CredentialResolutionException.notSet("BRAVE_SEARCH_TEST_KEY");
+
+        Harness.RunResult result = harness.run("web", "q");
+
+        assertEquals(3, result.exitCode(), () -> result.describe());
+        assertEquals(
+                "web: BRAVE_SEARCH_TEST_KEY is not set\n",
+                result.stderr(),
+                "an unset variable is fixed by setting it, so the store-a-key advice does not apply");
+    }
+
+    @Test
     void aStoredCredentialNoHeaderValueCanCarryKeepsExit3WithOneRedactedLineAndNoDispatch() {
         Harness harness = new Harness();
         harness.stored.credential = credential("ключ-\uD83E\uDDEA-stored");
@@ -774,7 +861,7 @@ final class WebSearchCommandTest {
         Harness.RunResult dispatched = withKey.run("web", "--base-url", "http://127.0.0.1:9/", "q");
 
         assertEquals(0, dispatched.exitCode(), () -> dispatched.describe());
-        WebSearchDispatch dispatch = withKey.exchange.dispatches.getFirst();
+        RemoteDispatch<WebSearchRequest> dispatch = withKey.exchange.dispatches.getFirst();
         assertFalse(dispatch.origin().credentialsAllowed(), "the override origin never receives stored credentials");
         assertEquals("http://127.0.0.1:9", dispatch.origin().baseUri().toString(), "trailing slash normalizes away");
         assertEquals(1, withKey.loopback.resolutions);
@@ -899,6 +986,8 @@ final class WebSearchCommandTest {
         final java.io.ByteArrayOutputStream stderrBytes = new java.io.ByteArrayOutputStream();
         ResultWriter writer = new OutputStreamResultWriter(stdoutBytes);
         CancellationRegistry cancellations = context -> () -> {};
+        /** The walk's pacing waiter: a double that never waits and reports nothing outstanding. */
+        PaginationService.RateWaiter waiter = (resetAt, cancellation) -> Duration.ZERO;
 
         Harness() {
             stored.credential = credential("stored-production-token");
@@ -916,7 +1005,7 @@ final class WebSearchCommandTest {
                     exchange,
                     presenter,
                     pagedPresenter,
-                    new PaginationService<>(new WebContinuationProbe(), (resetAt, cancellation) -> Duration.ZERO),
+                    new PaginationService<>(new WebContinuationProbe(), waiter),
                     cancellations,
                     writer,
                     WriterDiagnosticsSink::new);
@@ -976,8 +1065,8 @@ final class WebSearchCommandTest {
                 new WebSearchResult(status, new UpstreamPayload(body.getBytes(UTF_8)), null, null, null, null));
     }
 
-    private static final class RecordingExchange implements WebSearchExchange {
-        final List<WebSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<WebSearchRequest, WebSearchResult> {
+        final List<RemoteDispatch<WebSearchRequest>> dispatches = new ArrayList<>();
         final java.util.ArrayDeque<Outcome<WebSearchResult>> queued = new java.util.ArrayDeque<>();
         Runnable onDispatch = () -> {};
         Outcome<WebSearchResult> outcome = new Outcome.Success<>(
@@ -988,7 +1077,7 @@ final class WebSearchCommandTest {
         }
 
         @Override
-        public Outcome<WebSearchResult> dispatch(WebSearchDispatch invocation) {
+        public Outcome<WebSearchResult> dispatch(RemoteDispatch<WebSearchRequest> invocation) {
             dispatches.add(invocation);
             onDispatch.run();
             return queued.isEmpty() ? outcome : queued.poll();

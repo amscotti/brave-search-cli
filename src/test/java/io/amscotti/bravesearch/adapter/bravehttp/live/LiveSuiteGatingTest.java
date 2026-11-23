@@ -50,8 +50,9 @@ final class LiveSuiteGatingTest {
                 build.contains("excludeTags(\"live\")"),
                 "the default test run must exclude the live tag, so ordinary builds make zero external calls");
         assertTrue(
-                build.contains("maxParallelForks = 1"),
-                "the test task must pin single-fork execution for the serial live policy");
+                build.contains("maxParallelForks = if (liveBraveTests) 1 else"),
+                "the test task must pin single-fork execution for the serial live policy and fork"
+                        + " freely for the hermetic suite");
     }
 
     @Test

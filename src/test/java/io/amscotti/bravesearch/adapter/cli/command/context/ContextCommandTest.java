@@ -18,10 +18,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
-import io.amscotti.bravesearch.application.port.out.ContextDispatch;
-import io.amscotti.bravesearch.application.port.out.ContextExchange;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
@@ -163,7 +163,7 @@ final class ContextCommandTest {
         Harness.RunResult result = harness.run("context", "q");
 
         assertEquals(0, result.exitCode(), () -> result.describe());
-        ContextDispatch dispatch = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<ContextRequest> dispatch = harness.exchange.dispatches.getFirst();
         assertEquals(ContextRequest.builder("q").build(), dispatch.request());
         assertEquals(BraveApiOrigin.production(), dispatch.origin());
         assertTrue(dispatch.origin().credentialsAllowed(), "the default origin is the production origin");
@@ -322,7 +322,7 @@ final class ContextCommandTest {
         Harness.RunResult dispatched = withKey.run("context", "--base-url", "http://127.0.0.1:9/", "q");
 
         assertEquals(0, dispatched.exitCode(), () -> dispatched.describe());
-        ContextDispatch dispatch = withKey.exchange.dispatches.getFirst();
+        RemoteDispatch<ContextRequest> dispatch = withKey.exchange.dispatches.getFirst();
         assertFalse(dispatch.origin().credentialsAllowed(), "the override origin never receives stored credentials");
         assertEquals(1, withKey.loopback.resolutions);
         assertEquals(0, withKey.stored.resolutions);
@@ -439,13 +439,13 @@ final class ContextCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements ContextExchange {
-        final List<ContextDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<ContextRequest, ContextResult> {
+        final List<RemoteDispatch<ContextRequest>> dispatches = new ArrayList<>();
         Outcome<ContextResult> outcome = new Outcome.Success<>(
                 new ContextResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<ContextResult> dispatch(ContextDispatch invocation) {
+        public Outcome<ContextResult> dispatch(RemoteDispatch<ContextRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

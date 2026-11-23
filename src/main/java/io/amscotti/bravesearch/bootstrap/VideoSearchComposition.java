@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpVideoSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.VideoSearchEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.VideoPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.VideoSearchPresenter;
@@ -15,11 +13,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.videos.VideoProjectionEx
 import io.amscotti.bravesearch.adapter.cli.presentation.videos.VideoSearchPresenterImpl;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.VideoSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.service.SlicedRateWaiter;
+import io.amscotti.bravesearch.domain.request.VideoSearchRequest;
 import io.amscotti.bravesearch.domain.result.VideoSearchResult;
 import java.time.Clock;
 import java.util.Objects;
@@ -46,7 +44,7 @@ import java.util.function.Function;
  */
 public record VideoSearchComposition(
         CredentialProvider loopbackTestToken,
-        VideoSearchExchange exchange,
+        RemoteExchange<VideoSearchRequest, VideoSearchResult> exchange,
         VideoSearchPresenter presenter,
         PaginationService<VideoSearchResult> pagination,
         VideoPagedSearchPresenter pagedPresenter) {
@@ -64,29 +62,19 @@ public record VideoSearchComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
     static VideoSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+        JsonMappers mappers = new JsonMappers();
+        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static VideoSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        VideoSearchExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpVideoSearchGateway gateway = new BraveHttpVideoSearchGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
+        RemoteExchange<VideoSearchRequest, VideoSearchResult> exchange =
+                RemoteExchanges.blocking(VideoSearchEndpoint::assemble, VideoSearchResult::new, environmentLookup);
         PaginationService<VideoSearchResult> pagination =
                 new PaginationService<>(PaginationService.ContinuationProbe.alwaysContinue(), new SlicedRateWaiter(Clock.systemUTC()));
-        JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
         return new VideoSearchComposition(
                 loopbackTestToken, exchange, presenter(mappers, jsonl), pagination, pagedPresenter(mappers, jsonl));
     }

@@ -116,6 +116,28 @@ final class BraveHttpTransportDeadlineTest {
         assertThrows(IllegalArgumentException.class, () -> bounded.send(request, Duration.ofSeconds(-1)));
     }
 
+    @Test
+    void aZeroOrNegativeHeadersTimeoutIsRejectedBeforeAnyExchange() {
+        // a non-positive headers timeout would read as "no bound at all" on the phase that
+        // keeps its own timeout, so it is refused at construction
+        IllegalArgumentException zero = assertThrows(
+                IllegalArgumentException.class,
+                () -> new BraveHttpTransport(
+                        new BraveHttpClientFactory(Duration.ofSeconds(5)).newClient(),
+                        Duration.ZERO,
+                        ResponseLimits.production(),
+                        Clock.systemUTC()));
+
+        assertEquals("response headers timeout must be positive", zero.getMessage());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new BraveHttpTransport(
+                        new BraveHttpClientFactory(Duration.ofSeconds(5)).newClient(),
+                        Duration.ofSeconds(-1),
+                        ResponseLimits.production(),
+                        Clock.systemUTC()));
+    }
+
     private static BraveHttpTransport transport() {
         return new BraveHttpTransport(
                 new BraveHttpClientFactory(Duration.ofSeconds(5)).newClient(),

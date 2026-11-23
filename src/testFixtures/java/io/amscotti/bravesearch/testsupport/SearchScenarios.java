@@ -287,6 +287,54 @@ public abstract class SearchScenarios {
     }
 
     /**
+     * The production origin answers a rejected key with 422 and an auth-bearing code —
+     * observed live — so that answer is an authentication failure, never a generic upstream
+     * error: a mistyped key must read as a rejected key to humans and agents alike.
+     */
+    protected static void aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes(
+            List<String> command, String commandName, String sandboxPrefix) throws Exception {
+        String testKey = freshToken();
+        try (Sandbox sandbox = Sandbox.create(sandboxPrefix);
+                ScriptedSseServer server = ScriptedSseServer.builder()
+                        .statusCode(422)
+                        .header("Content-Type", "application/json")
+                        .writeBytes(
+                                "{\"error\":{\"code\":\"SUBSCRIPTION_TOKEN_INVALID\",\"detail\":\"recovery hint\"}}"
+                                        .getBytes(UTF_8))
+                        .start()) {
+            ProcessHarness.ProcessResult human =
+                    run(command, server, childEnvironment(sandbox.directory, testKey), "three word query");
+            assertEquals(4, human.exitStatus(), () -> describe(human, testKey));
+            assertEquals("", new String(human.stdout(), UTF_8), () -> describe(human, testKey));
+            List<String> diagnostics = new String(human.stderr(), UTF_8).lines().toList();
+            assertEquals(1, diagnostics.size(), () -> "exactly one diagnostic line: " + describe(human, testKey));
+            assertEquals(
+                    commandName + ": the Brave API rejected the API key (HTTP 422, code SUBSCRIPTION_TOKEN_INVALID); "
+                            + "check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'",
+                    diagnostics.getFirst(),
+                    () -> "the human line says what happened and what to do: " + describe(human, testKey));
+            assertTokenMaterialAbsent(human, testKey);
+
+            ProcessHarness.ProcessResult json = run(
+                    command, server, childEnvironment(sandbox.directory, testKey), "--output", "json", "three word query");
+            assertEquals(4, json.exitStatus(), () -> describe(json, testKey));
+            String stdout = new String(json.stdout(), UTF_8);
+            assertTrue(stdout.contains("\"message\":\"upstream exchange failed with status 422\""),
+                    () -> "the machine document keeps its fixed message text: " + describe(json, testKey));
+            assertTrue(
+                    new SchemaCatalog().validateText("envelope-error.schema.json", stdout).isEmpty(),
+                    () -> "the failure envelope must satisfy envelope-error.schema.json: " + describe(json, testKey));
+            JsonNode envelope = READER.readTree(json.stdout());
+            assertFalse(envelope.path("ok").asBoolean());
+            assertEquals("AUTHENTICATION_FAILED", envelope.path("error").path("code").asText());
+            assertFalse(envelope.path("error").path("retryable").asBoolean());
+            assertEquals("SUBSCRIPTION_TOKEN_INVALID", envelope.path("error").path("upstream_code").asText());
+            assertEquals(422, envelope.path("meta").path("http_status").asInt());
+            assertTokenMaterialAbsent(json, testKey);
+        }
+    }
+
+    /**
      * A 429 ends the JSONL stream in one rate-limited error record that carries the
      * observed windows — the same per-window rendering as the envelope's
      * {@code meta.rate_limits} — so a line-oriented consumer can honor the reset without
@@ -901,7 +949,7 @@ public abstract class SearchScenarios {
                         .header("X-RateLimit-Limit", "1")
                         .header("X-RateLimit-Policy", "request")
                         .header("X-RateLimit-Remaining", "0")
-                        .header("X-RateLimit-Reset", "3600")
+                        .header("X-RateLimit-Reset", "30")
                         .writeBytes(pacedWalkPage)
                         .start()) {
             List<String> prefix = new ArrayList<>(command);
@@ -947,7 +995,12 @@ public abstract class SearchScenarios {
                         session.exitValue(),
                         () -> "the latched signal owns the status, stderr=<" + new String(session.stderr(), UTF_8) + ">");
                 assertEquals("", new String(drainAfterExit(session), UTF_8), "a buffered mode emits no partial payload");
-                List<String> diagnostics = new String(session.stderr(), UTF_8).lines().toList();
+                List<String> diagnostics = new String(session.stderr(), UTF_8)
+                        .lines()
+                        // the human mode announces a pacing wait before performing it; that line
+                        // is progress, and the failure after it is still exactly one diagnostic
+                        .filter(line -> !line.contains(" for the rate-limit window to reset before page "))
+                        .toList();
                 assertEquals(1, diagnostics.size(), () -> "exactly one diagnostic line: " + diagnostics);
                 assertTrue(
                         diagnostics.getFirst().matches(

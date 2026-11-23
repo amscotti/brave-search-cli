@@ -11,6 +11,7 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.OutputStreamResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDescribePresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDetailsPresenter;
+import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
@@ -22,8 +23,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.places.PlaceDetailsPrese
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentDispatch;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.service.SlicedRateWaiter;
@@ -34,10 +35,13 @@ import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
 import io.amscotti.bravesearch.domain.request.PlaceEnrichmentRequest;
 import io.amscotti.bravesearch.domain.result.PlaceEnrichmentResult;
+import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UncheckedIOException;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -66,7 +70,7 @@ final class PlacesEnrichmentCommandTest {
         Harness.RunResult result = harness.runDetails(ids.toArray(String[]::new));
 
         assertEquals(0, result.exitCode(), () -> result.describe());
-        List<PlaceEnrichmentDispatch> dispatches = harness.exchange.dispatches;
+        List<RemoteDispatch<PlaceEnrichmentRequest>> dispatches = harness.exchange.dispatches;
         assertEquals(3, dispatches.size(), "45 ids fan out into three chunk requests");
         assertEquals(ids.subList(0, 20), dispatches.get(0).request().ids());
         assertEquals(ids.subList(20, 40), dispatches.get(1).request().ids());
@@ -224,6 +228,127 @@ final class PlacesEnrichmentCommandTest {
                 () -> "the transport render carries the walk's request counts: " + result.describe());
     }
 
+    @Test
+    void aBrokenPipeMidChunkWalkEndsTheRunAsSilentZero() {
+        Harness harness = new Harness();
+        harness.writer = new FailingWriter(new IOException("Broken pipe"));
+        enqueueSilentChunks(harness, 3);
+
+        Harness.RunResult result = harness.runDetails(asJsonl(fortyFiveIds()));
+
+        assertEquals(
+                0,
+                result.exitCode(),
+                () -> "a consumer closing the pipe mid-walk is successful early termination: " + result.describe());
+        assertEquals("", result.stderr(), () -> "early termination stays silent: " + result.describe());
+        assertEquals(1, harness.exchange.dispatches.size(), "no further chunk is requested once the consumer is gone");
+    }
+
+    @Test
+    void aNonPipeWriteFailureMidChunkWalkKeepsTheTransportStatusWithOneDiagnosticLine() {
+        Harness harness = new Harness();
+        harness.writer = new FailingWriter(new IOException("no space left on device"));
+        enqueueSilentChunks(harness, 3);
+
+        Harness.RunResult result = harness.runDetails(asJsonl(fortyFiveIds()));
+
+        assertEquals(6, result.exitCode(), () -> "an output-I/O failure keeps the transport status: " + result.describe());
+        assertEquals(
+                List.of("places.details: writing the result document failed"),
+                result.stderr().lines().toList(),
+                () -> result.describe());
+        assertEquals(1, harness.exchange.dispatches.size(), "no further chunk is requested after the write failed");
+    }
+
+    @Test
+    void aBrokenPipeAfterAUserSignalWasLatchedStillExitsByThatSignal() {
+        for (Map.Entry<CancellationContext.Cause, Integer> signal : Map.of(
+                        CancellationContext.Cause.SIGINT, 130, CancellationContext.Cause.SIGTERM, 143)
+                .entrySet()) {
+            Harness harness = new Harness();
+            List<CancellationContext> liveContexts = new CopyOnWriteArrayList<>();
+            harness.cancellations =
+                    context -> {
+                        liveContexts.add(context);
+                        return () -> liveContexts.remove(context);
+                    };
+            // the signal takes the consumer away too, so the pipe closes behind it: a script
+            // reading the status must learn of the signal, never of a clean early end
+            harness.writer = new SignalThenBrokenPipe(liveContexts, signal.getKey());
+            enqueueSilentChunks(harness, 3);
+
+            Harness.RunResult result = harness.runDetails(asJsonl(fortyFiveIds()));
+
+            assertEquals(
+                    signal.getValue(),
+                    result.exitCode(),
+                    () -> "the signal that won the latch owns the status, not the closed pipe: " + result.describe());
+            assertEquals("", result.stderr(), () -> result.describe());
+            assertEquals(1, harness.exchange.dispatches.size(), "the walk stops where the consumer went away");
+        }
+    }
+
+    private static void enqueueSilentChunks(Harness harness, int chunks) {
+        for (int chunk = 1; chunk <= chunks; chunk++) {
+            harness.exchange.enqueue(chunkOutcome(200, "{}"));
+        }
+    }
+
+    /** The same invocation on the streaming channel, which writes each chunk as it arrives. */
+    private static String[] asJsonl(String[] ids) {
+        String[] arguments = new String[ids.length + 2];
+        arguments[0] = "--output";
+        arguments[1] = "jsonl";
+        System.arraycopy(ids, 0, arguments, 2, ids.length);
+        return arguments;
+    }
+
+    /** Forty-five ids: three consecutive chunks of the invocation's chunk size. */
+    private static String[] fortyFiveIds() {
+        return IntStream.rangeClosed(1, 45).mapToObj(number -> "poi-" + number).toArray(String[]::new);
+    }
+
+    /** A writer whose every write fails with one cause: the consumer that is already gone. */
+    private static final class FailingWriter implements ResultWriter {
+
+        private final IOException failure;
+
+        FailingWriter(IOException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void write(byte[] document) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    /**
+     * A writer that lets its first write through, then latches a user signal on every live
+     * context and reports a closed pipe: the order a real interrupt produces, because the
+     * signal takes the consumer before the next write reaches the broken pipe.
+     */
+    private static final class SignalThenBrokenPipe implements ResultWriter {
+
+        private final List<CancellationContext> liveContexts;
+        private final CancellationContext.Cause signal;
+        private int writes;
+
+        SignalThenBrokenPipe(List<CancellationContext> liveContexts, CancellationContext.Cause signal) {
+            this.liveContexts = liveContexts;
+            this.signal = signal;
+        }
+
+        @Override
+        public void write(byte[] document) {
+            if (writes++ == 0) {
+                return;
+            }
+            liveContexts.forEach(context -> context.latch(signal));
+            throw new UncheckedIOException(new IOException("Broken pipe"));
+        }
+    }
+
     private static Outcome.Success<PlaceEnrichmentResult> chunkOutcome(int status, String body) {
         return new Outcome.Success<>(
                 new PlaceEnrichmentResult(status, new UpstreamPayload(body.getBytes(UTF_8)), null, null, null, null));
@@ -263,6 +388,8 @@ final class PlacesEnrichmentCommandTest {
         final java.io.ByteArrayOutputStream stdoutBytes = new java.io.ByteArrayOutputStream();
         final java.io.ByteArrayOutputStream stderrBytes = new java.io.ByteArrayOutputStream();
         io.amscotti.bravesearch.application.stream.CancellationRegistry cancellations = new ExchangeRegistry();
+        /** The result writer of a run; a test replaces it to fail a write mid-walk. */
+        ResultWriter writer = new OutputStreamResultWriter(stdoutBytes);
 
         Harness() {
             stored.credential = credential("stored-production-token");
@@ -303,7 +430,7 @@ final class PlacesEnrichmentCommandTest {
                     detailsPresenter,
                     pagination,
                     cancellations,
-                    new OutputStreamResultWriter(stdoutBytes),
+                    writer,
                     WriterDiagnosticsSink::new);
             PlacesDescribeCommand describe = new PlacesDescribeCommand(
                     globals,
@@ -314,7 +441,7 @@ final class PlacesEnrichmentCommandTest {
                     describePresenter,
                     pagination,
                     cancellations,
-                    new OutputStreamResultWriter(stdoutBytes),
+                    writer,
                     WriterDiagnosticsSink::new);
             CommandLine group = new CommandLine(new PlacesCommand());
             group.addSubcommand(PlacesDetailsCommand.NAME, new CommandLine(details));
@@ -341,8 +468,8 @@ final class PlacesEnrichmentCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements PlaceEnrichmentExchange {
-        final List<PlaceEnrichmentDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> {
+        final List<RemoteDispatch<PlaceEnrichmentRequest>> dispatches = new ArrayList<>();
         final java.util.ArrayDeque<Outcome<PlaceEnrichmentResult>> queued = new java.util.ArrayDeque<>();
         Runnable onDispatch = () -> {};
         Outcome<PlaceEnrichmentResult> outcome = new Outcome.Success<>(
@@ -353,7 +480,7 @@ final class PlacesEnrichmentCommandTest {
         }
 
         @Override
-        public Outcome<PlaceEnrichmentResult> dispatch(PlaceEnrichmentDispatch invocation) {
+        public Outcome<PlaceEnrichmentResult> dispatch(RemoteDispatch<PlaceEnrichmentRequest> invocation) {
             dispatches.add(invocation);
             onDispatch.run();
             return queued.isEmpty() ? outcome : queued.poll();

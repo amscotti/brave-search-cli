@@ -41,9 +41,29 @@ final class SecretInputTest {
 
     @Test
     void consoleInputIsEncodedAsUtf8Bytes() {
-        Credential read = new SecretInput(console("ключ-キー-\uD83E\uDDEA".toCharArray()), stdin("")).read(false);
+        // every character here sits above U+007F, so UTF-8 needs two bytes for each — and
+        // every one stays inside the alphabet an HTTP header value can carry
+        Credential read = new SecretInput(console("\u00e9-\u00ff-\u00df".toCharArray()), stdin("")).read(false);
 
-        assertEquals("ключ-キー-\uD83E\uDDEA", new String(read.tokenBytes(), UTF_8));
+        assertEquals("\u00e9-\u00ff-\u00df", new String(read.tokenBytes(), UTF_8));
+    }
+
+    @Test
+    void aSecretNoHttpHeaderCanCarryIsTheTypedSecretInputFailureOnBothPaths() {
+        String unwirable = "BSA-kappa-\u03ba";
+
+        for (boolean fromStdin : new boolean[] {false, true}) {
+            LocalConfigException failure = assertThrows(
+                    LocalConfigException.class,
+                    () -> new SecretInput(console(unwirable.toCharArray()), stdin(unwirable + "\n"))
+                            .read(fromStdin));
+
+            assertEquals(LocalConfigException.Reason.SECRET_INPUT, failure.reason(), () -> "stdin=" + fromStdin);
+            assertTrue(
+                    failure.getMessage().contains("an HTTP header value cannot carry"),
+                    () -> "the rejection names the rule: " + failure.getMessage());
+            assertFalse(failure.getMessage().contains("BSA-kappa"), "the rejection never carries token material");
+        }
     }
 
     @Test
@@ -233,6 +253,32 @@ final class SecretInputTest {
 
         assertEquals(LocalConfigException.Reason.SECRET_INPUT, failure.reason());
         assertFalse(failure.getMessage().contains("sentinel-io-message"), "the stream's own message must not surface");
+    }
+
+    @Test
+    void aStdinFailureAfterTheLineIsTheTypedSecretInputFailureWithoutTheSecret() {
+        // the line itself arrives intact; the stream breaks while the reader proves that
+        // nothing but whitespace follows it
+        InputStream breakingAfterTheLine = new InputStream() {
+            private final InputStream line = stdin("sentinel-after-line\n");
+
+            @Override
+            public int read() throws IOException {
+                int next = line.read();
+                if (next == -1) {
+                    throw new IOException("stream broke after the line");
+                }
+                return next;
+            }
+        };
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class,
+                () -> new SecretInput(console(null), breakingAfterTheLine).read(true));
+
+        assertEquals(LocalConfigException.Reason.SECRET_INPUT, failure.reason());
+        assertTrue(failure.getMessage().contains("could not be read"), failure.getMessage());
+        assertFalse(failure.getMessage().contains("sentinel-after-line"), "the failure never carries the secret");
     }
 
     @Test

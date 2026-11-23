@@ -59,6 +59,9 @@ public final class ScriptedSseServer implements AutoCloseable {
     private final List<Script> scripts;
     private final CountDownLatch headersGate;
     private final List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
+
+    /** The client port each recorded request arrived from, in arrival order. */
+    private final List<Integer> clientPorts = new CopyOnWriteArrayList<>();
     private final CountDownLatch connectionClosed = new CountDownLatch(1);
 
     private ScriptedSseServer(List<Script> scripts, CountDownLatch headersGate) throws IOException {
@@ -84,6 +87,14 @@ public final class ScriptedSseServer implements AutoCloseable {
     /** Snapshot of the requests recorded so far, oldest first. */
     public List<RecordedRequest> requests() {
         return List.copyOf(requests);
+    }
+
+    /**
+     * How many connections the recorded requests arrived over: the count of distinct client
+     * ports, so a client that keeps one connection alive across its requests counts once.
+     */
+    public int connectionCount() {
+        return (int) clientPorts.stream().filter(port -> port >= 0).distinct().count();
     }
 
     /**
@@ -168,6 +179,7 @@ public final class ScriptedSseServer implements AutoCloseable {
         }
         synchronized (requests) {
             requests.add(new RecordedRequest(exchange.getRequestMethod(), exchange.getRequestURI().toString(), headers, recorded));
+            clientPorts.add(exchange.getRemoteAddress() == null ? -1 : exchange.getRemoteAddress().getPort());
             requests.notifyAll();
         }
     }

@@ -11,7 +11,7 @@ import io.amscotti.bravesearch.adapter.cli.presentation.AnswersStreamPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
@@ -740,7 +740,7 @@ final class AnswersStreamPresenterImplTest {
     }
 
     /** The warnings-channel router the composition injects, opening this command's channel. */
-    private SearchPresenterBase.WarningsRouter warnings() {
+    private WarningsRouter warnings() {
         return (mode, diagnostics, results, quiet) ->
                 new ModeAwareWarnings(mode, "answers", diagnostics, results, jsonl, quiet);
     }

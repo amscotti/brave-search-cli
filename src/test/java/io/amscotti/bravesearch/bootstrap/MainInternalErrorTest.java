@@ -3,6 +3,7 @@ package io.amscotti.bravesearch.bootstrap;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.ContextPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
@@ -56,6 +57,65 @@ final class MainInternalErrorTest {
                 "no internal class names beyond the exception's own simple name: " + result.describe());
         assertFalse(result.stderr().contains("Crashing"), "the crashing class stays unnamed: " + result.describe());
         assertEquals("", result.stdout(), "a crashed run writes no stdout payload: " + result.describe());
+    }
+
+    @Test
+    void withTheDebugVariableSetAnInternalErrorAlsoPrintsATraceOfFramesAndTypesButNeverAMessage() {
+        RunResult result = runGuarded(
+                () -> new Main(
+                        new ExchangeRegistry(),
+                        configComposition(),
+                        Compositions.process(configComposition().credentials(), new ExchangeRegistry())
+                                .withWebSearch(webComposition())
+                                .withContext(contextComposition(new CrashingPresenter())),
+                        name -> "1"),
+                "context",
+                "q");
+
+        assertEquals(70, result.exitCode(), "the debug opt-in changes the report, never the status: " + result.describe());
+        List<String> lines = result.stderr().lines().toList();
+        assertEquals(
+                "brave-search: unexpected internal error (IllegalStateException)",
+                lines.getFirst(),
+                "the redacted line still comes first");
+        assertTrue(lines.size() > 3, "the trace follows the redacted line: " + result.describe());
+        assertTrue(
+                lines.stream().anyMatch(line -> line.stripLeading().startsWith("at io.amscotti.bravesearch.")),
+                "the trace names the frames where the failure happened: " + result.describe());
+        assertFalse(
+                result.stderr().contains("presenter crashed mid-render"),
+                "an exception message can quote user input or credential material, so no trace carries it: "
+                        + result.describe());
+        assertEquals("", result.stdout(), "a traced crash still writes no stdout payload");
+    }
+
+    @Test
+    void theDebugTraceFollowsTheCauseChainAndStillPrintsNoMessage() {
+        RunResult result = runGuarded(
+                () -> new Main(
+                        new ExchangeRegistry(),
+                        configComposition(),
+                        Compositions.process(configComposition().credentials(), new ExchangeRegistry())
+                                .withWebSearch(webComposition())
+                                .withContext(contextComposition(new ChainedCrashPresenter())),
+                        name -> "1"),
+                "context",
+                "q");
+
+        List<String> lines = result.stderr().lines().toList();
+        assertEquals("brave-search: unexpected internal error (IllegalStateException)", lines.getFirst());
+        assertTrue(
+                lines.contains("brave-search: debug trace, exception messages withheld: IllegalStateException"),
+                "the trace opens with the outer type: " + result.describe());
+        assertTrue(
+                lines.contains("brave-search: caused by: IllegalArgumentException"),
+                "and names every cause by type: " + result.describe());
+        assertTrue(
+                lines.stream().filter(line -> line.stripLeading().startsWith("at ")).count() >= 2,
+                "with frames for the failure and its cause: " + result.describe());
+        assertFalse(result.stderr().contains("outer message sentinel"), "no outer message: " + result.describe());
+        assertFalse(result.stderr().contains("inner message sentinel"), "no inner message either: " + result.describe());
+        assertEquals(70, result.exitCode(), "the opt-in never changes the status");
     }
 
     @Test
@@ -138,7 +198,7 @@ final class MainInternalErrorTest {
     }
 
     private RunResult runMain(ContextComposition context, String... args) {
-        return runGuarded(() -> new Main(new ExchangeRegistry(), configComposition(), webComposition(), context), args);
+        return runGuarded(() -> new Main(new ExchangeRegistry(), configComposition(), Compositions.process(configComposition().credentials(), new ExchangeRegistry()).withWebSearch(webComposition()).withContext(context)), args);
     }
 
     private ConfigComposition configComposition() {
@@ -189,6 +249,21 @@ final class MainInternalErrorTest {
     }
 
     /** The crashing injected presenter: the runtime failure a composition defect produces mid-render. */
+    /** A presenter that crashes with a chained cause, each link carrying a message of its own. */
+    private static final class ChainedCrashPresenter implements ContextPresenter {
+
+        @Override
+        public int present(
+                Outcome<ContextResult> outcome,
+                ContextRequest request,
+                OutputRequest output,
+                ResultWriter results,
+                DiagnosticsSink diagnostics) {
+            throw new IllegalStateException(
+                    "outer message sentinel", new IllegalArgumentException("inner message sentinel"));
+        }
+    }
+
     private static final class CrashingPresenter implements ContextPresenter {
         @Override
         public int present(

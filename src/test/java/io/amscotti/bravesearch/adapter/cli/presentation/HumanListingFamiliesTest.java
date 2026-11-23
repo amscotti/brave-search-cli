@@ -425,7 +425,7 @@ final class HumanListingFamiliesTest {
         return stdout.toString(UTF_8);
     }
 
-    private SearchPresenterBase.WarningsRouter warnings(String command) {
+    private WarningsRouter warnings(String command) {
         return (mode, diagnostics, results, quiet) ->
                 new ModeAwareWarnings(mode, command, diagnostics, results, jsonl, quiet);
     }

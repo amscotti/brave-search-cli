@@ -18,42 +18,24 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class CancellationContext {
 
-    /** Why the run terminated; each cause fixes the process exit code. */
-    public enum Cause {
-        /** The user interrupted the process; conventional shell signal exit status. */
-        SIGINT(130),
-
+    /** Why the run terminated; the CLI exit table derives the process status from the cause. */
+    public enum Cause {        /** The user interrupted the process; conventional shell signal exit status. */
+        SIGINT,
         /** The user terminated the process; conventional shell signal exit status. */
-        SIGTERM(143),
-
+        SIGTERM,
         /** The consumer closed the output stream; a normal end of the stream, not a failure. */
-        BROKEN_PIPE(0),
-
+        BROKEN_PIPE,
         /** No event arrived within the allowed inactivity window. */
-        IDLE_TIMEOUT(6),
-
+        IDLE_TIMEOUT,
         /** The run exceeded its total wall-clock budget. */
-        WALL_TIMEOUT(6),
-
+        WALL_TIMEOUT,
         /** The downstream subscriber failed while consuming the stream. */
-        SUBSCRIBER_FAILURE(6),
-
+        SUBSCRIBER_FAILURE,
         /** The transport under the stream failed — a reset, truncated, or unreachable body. */
-        TRANSPORT_FAILURE(6),
+        TRANSPORT_FAILURE,
 
         /** The stream ended or was closed explicitly without another cause firing first. */
-        CLOSED(0);
-
-        private final int exitCode;
-
-        Cause(int exitCode) {
-            this.exitCode = exitCode;
-        }
-
-        /** Process exit status for this terminal cause. */
-        public int exitCode() {
-            return exitCode;
-        }
+        CLOSED;
     }
 
     private final AtomicReference<Cause> cause = new AtomicReference<>();
@@ -83,10 +65,18 @@ public final class CancellationContext {
     }
 
     /**
-     * Waits until the first latch; never throws. An interrupt while waiting leaves the wait in
-     * place and the thread's interrupt flag is still set on return, so callers do not lose the
-     * signal.
+     * Waits until the first latch, or until the waiting thread is interrupted. An interrupt
+     * ends the wait by throwing and latches nothing, so a watcher parked here retires on its
+     * own interrupt instead of polling the latch; the terminal cause is read through
+     * {@link #cause()} once the wait returns.
+     *
+     * @throws InterruptedException when the waiting thread is interrupted before the latch;
+     *     the interrupt status is cleared, as every checked wait leaves it
      */
+    public void await() throws InterruptedException {
+        released.await();
+    }
+
     public void awaitUninterruptibly() {
         boolean interrupted = false;
         while (released.getCount() > 0) {

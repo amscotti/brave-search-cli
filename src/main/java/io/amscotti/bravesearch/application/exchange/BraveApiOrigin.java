@@ -1,6 +1,5 @@
 package io.amscotti.bravesearch.application.exchange;
 
-import io.amscotti.bravesearch.domain.config.Credential;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -8,7 +7,6 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * Immutable origin policy of the Brave API exchange.
@@ -78,22 +76,13 @@ public final class BraveApiOrigin {
         return baseUri;
     }
 
-    /** Whether stored production credentials may be sent to this origin. */
+    /**
+     * Whether stored production credentials may be sent to this origin. This is the routing
+     * rule; {@code CredentialProvider.routedTo} applies it between two credential providers,
+     * so the exchange vocabulary stays independent of the ports that consume it.
+     */
     public boolean credentialsAllowed() {
         return credentialsAllowed;
-    }
-
-    /**
-     * Routes between the stored production credential supplier and the injected loopback
-     * test-token supplier: the stored credential reaches only the exact production origin,
-     * while every loopback origin draws its token from the test-token supplier instead. The
-     * composition injects both suppliers; the origin only enforces the routing rule.
-     */
-    public Supplier<Credential> credentialSource(
-            Supplier<Credential> storedCredential, Supplier<Credential> loopbackTestToken) {
-        Objects.requireNonNull(storedCredential, "storedCredential");
-        Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
-        return credentialsAllowed ? storedCredential : loopbackTestToken;
     }
 
     @Override

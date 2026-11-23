@@ -92,7 +92,7 @@ final class WebSearchCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, webSearch).execute(args);
+            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webSearch)).execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {
             System.setOut(originalOut);

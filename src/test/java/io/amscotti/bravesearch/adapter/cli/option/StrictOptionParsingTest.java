@@ -40,6 +40,25 @@ final class StrictOptionParsingTest {
     }
 
     @Test
+    void anUnknownOptionIsNamedWithoutTheArgumentsItsFailedParseCouldNotPlace() {
+        // the typo'd option's own value and the query text follow it on the command line;
+        // neither is an option, and naming them as unknown options blames the user's query
+        RunResult typo = run("--timout", "30s", "heat pump efficiency");
+
+        assertEquals(2, typo.exitCode(), () -> typo.describe());
+        assertEquals(
+                "Unknown option: '--timout'",
+                typo.stderr().lines().findFirst().orElse(""),
+                () -> "the report names the offending option alone: " + typo.describe());
+        assertTrue(
+                typo.stderr().lines().skip(1).noneMatch(line -> line.contains("heat pump") || line.startsWith("Unknown")),
+                () -> "the misplaced arguments are not reported as options: " + typo.describe());
+        assertTrue(
+                typo.stderr().contains("--timeout"),
+                () -> "the suggestion of the intended option stays: " + typo.describe());
+    }
+
+    @Test
     void aRepeatedSingleValuedOptionIsAUsageError() {
         RunResult repeated = run("--budget", "30s", "--budget", "45s");
 

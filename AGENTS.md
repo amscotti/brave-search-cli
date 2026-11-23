@@ -14,10 +14,11 @@ daemon in automation contexts, and keep output plain:
 env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain clean check
 ```
 
-`check` runs the unit tests (including the executable architecture test and the packaged
-release-archive verification, which build the native image first), the JaCoCo coverage
+`check` runs the unit tests (including the executable architecture test), the JaCoCo coverage
 report with its line/branch floor over the JVM suite, the repository hygiene
-gate, the native smoke test suite (expect several minutes), the library publication check
+gate, the packaged release-archive verification (its own `releaseArchiveTest` task, which
+builds the native image first), the native smoke test suite (expect several minutes), the
+library publication check
 (`verifyLibraryPublication`: the mavenLocal artifacts, their contents, and the pom facts),
 the independent `sample-consumer` suite against the published artifact, and the
 verification-metadata completeness guard (`verifyMetadataComplete`: every component pinned
@@ -29,6 +30,10 @@ A focused test run uses Gradle's `--tests` filter:
 env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain test \
   --tests 'io.amscotti.bravesearch.architecture.ArchitectureTest'
 ```
+
+The plain `test` task depends on the installed JVM launcher alone: it never builds the
+native image, never publishes to the local Maven repository, and never needs a release
+archive, so the inner test loop stays fast after production code changes.
 
 The hygiene gate alone:
 

@@ -1,7 +1,7 @@
 package io.amscotti.bravesearch.adapter.cli.presentation.web;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.PagedSearchPresenterBase;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
@@ -30,7 +30,7 @@ public final class WebPagedSearchPresenterImpl
             EnvelopeCodec envelopes,
             JsonlCodec jsonl,
             WebProjectionExtractor extractor,
-            SearchPresenterBase.WarningsRouter warnings) {
+            WarningsRouter warnings) {
         super(envelopes, jsonl, warnings);
         this.extractor = Objects.requireNonNull(extractor, "extractor");
     }

@@ -8,6 +8,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.PagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteWalk;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
@@ -75,9 +77,9 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
 
     private final PaginationService<TRes> pagination;
 
-    private final CancellationRegistry cancellations;
-
     /**
+     * @param exchange the outbound port of one fully parsed invocation; its walk form carries
+     *     every page of {@code --all-pages} over one transport lifecycle
      * @param pagination the sequential page-walk orchestrator of {@code --all-pages}
      * @param cancellations the process registry that lets an interrupt cancel a pacing wait
      *     of the page walk
@@ -88,6 +90,7 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
+            RemoteExchange<TReq, TRes> exchange,
             SearchPresenter<TReq, TRes> presenter,
             PagedSearchPresenter<TReq, TRes> pagedPresenter,
             PaginationService<TRes> pagination,
@@ -99,6 +102,7 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
@@ -106,7 +110,6 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
         this.pagedPresenter = Objects.requireNonNull(pagedPresenter, "pagedPresenter");
         this.pagination = Objects.requireNonNull(pagination, "pagination");
-        this.cancellations = Objects.requireNonNull(cancellations, "cancellations");
     }
 
     /** The smallest user-facing page the endpoint documents. */
@@ -154,15 +157,18 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
             return super.dispatchAndPresent(request, credential, output, results, diagnostics);
         }
         CancellationContext cancellation = new CancellationContext();
-        Runnable detach = cancellations.register(cancellation);
-        try {
+        Runnable detach = cancellations().register(cancellation);
+        try (RemoteWalk<TReq, TRes> walk = exchange().openWalk(dispatchOf(request, credential, cancellation))) {
+            // every page of the walk rides the one transport lifecycle the walk opened, so
+            // the connection to the peer survives from the first page to the last
             PaginationService.PagedRun<TRes> run;
             try {
                 run = pagination.fetchAll(
-                        page -> exchange(withPage(request, page), credential, cancellation),
+                        page -> walk.dispatch(withPage(request, page)),
                         maxPages == null ? maxDocumentedPage() : maxPages,
                         cancellation,
-                        pagedPresenter.pageObserver(output, results, diagnostics));
+                        pagedPresenter.pageObserver(output, results, diagnostics),
+                        announcePacingWaits("page", commandName(), output, diagnostics));
             } catch (UncheckedIOException writeFailure) {
                 return exitForWalkWriteFailure(writeFailure, cancellation, diagnostics);
             }

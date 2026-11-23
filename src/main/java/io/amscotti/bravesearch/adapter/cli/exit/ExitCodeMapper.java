@@ -1,5 +1,7 @@
 package io.amscotti.bravesearch.adapter.cli.exit;
 
+import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.stream.CauseSignals;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.FailureSignal;
 import java.util.Collections;
@@ -13,8 +15,9 @@ import java.util.Objects;
  *
  * <p>Success and broken pipe are both {@code 0} because a downstream consumer terminating a
  * stream early is successful early termination, not a failure; SIGINT termination carries the
- * conventional {@code 128 + 2} and SIGTERM the conventional {@code 128 + 15}. Pure function:
- * the mapping is total, side-effect free, and stable within CLI major version 1.
+ * conventional {@code 128 + 2} and SIGTERM the conventional {@code 128 + 15}. A streaming run's
+ * terminal cause reads its status here too, through its failure signal. Pure function: the
+ * mapping is total, side-effect free, and stable within CLI major version 1.
  */
 public final class ExitCodeMapper {
 
@@ -47,6 +50,21 @@ public final class ExitCodeMapper {
             case INTERRUPTED -> SIGINT;
             case TERMINATED -> SIGTERM;
             default -> forKind(signal.kind());
+        };
+    }
+
+    /**
+     * The exit status of a streaming run's terminal cause, read through the cause's failure
+     * signal. This table is the one owner of process exit statuses: the streaming latch in
+     * the application layer names why a run ended and knows nothing of statuses.
+     *
+     * @throws NullPointerException when {@code cause} is null
+     */
+    public static int forCause(CancellationContext.Cause cause) {
+        return switch (Objects.requireNonNull(cause, "cause")) {
+            case BROKEN_PIPE -> BROKEN_PIPE;
+            case CLOSED -> SUCCESS;
+            default -> forSignal(CauseSignals.failureSignal(cause).orElseThrow());
         };
     }
 

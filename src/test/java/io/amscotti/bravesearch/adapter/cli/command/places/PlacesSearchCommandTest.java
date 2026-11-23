@@ -21,8 +21,8 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
-import io.amscotti.bravesearch.application.port.out.PlaceSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.PlaceSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
@@ -324,13 +324,13 @@ final class PlacesSearchCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements PlaceSearchExchange {
-        final List<PlaceSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<PlaceSearchRequest, PlaceSearchResult> {
+        final List<RemoteDispatch<PlaceSearchRequest>> dispatches = new ArrayList<>();
         Outcome<PlaceSearchResult> outcome = new Outcome.Success<>(
                 new PlaceSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<PlaceSearchResult> dispatch(PlaceSearchDispatch invocation) {
+        public Outcome<PlaceSearchResult> dispatch(RemoteDispatch<PlaceSearchRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

@@ -1,5 +1,7 @@
 package io.amscotti.bravesearch.adapter.config;
 
+import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
+import io.amscotti.bravesearch.application.exchange.InvalidTokenException;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.config.InvalidCredentialException;
 import io.amscotti.bravesearch.domain.config.LocalConfigException;
@@ -19,13 +21,16 @@ import java.util.Optional;
  * when the caller explicitly requested it — standard input under the exact one-line contract.
  *
  * <p>Console path: the injected {@link ConsoleAccess} owns every {@code System.console} touch of
- * this package; its characters are encoded as UTF-8, validated through the credential contract,
- * and the character buffer is wiped after use.
+ * this package; its characters are encoded as UTF-8, validated through the credential contract
+ * and the header alphabet of the subscription token, and the character buffer is wiped after use.
+ * The wiping is deliberate but partial: the encoded bytes are copied into the credential and,
+ * on exchange, into an immutable header string, and Java offers no way to wipe those copies.
  *
  * <p>Stdin path: exactly one nonempty line terminated by LF or CRLF, with only that terminator
  * removed. Rejected — as the typed secret-input configuration error, never echoing the offered
  * bytes — are end of file before the terminator, control characters inside the line, bytes that
- * are not valid UTF-8, a line above {@link Credential#MAX_BYTES}, and any non-whitespace byte
+ * are not valid UTF-8, a line above {@link Credential#MAX_BYTES}, a token carrying a character
+ * above U+00FF, and any non-whitespace byte
  * after the terminator; trailing ASCII whitespace and blank lines are accepted. An interrupted
  * or failing stream restores the interrupt flag and fails the same way, so the command layer
  * can guarantee the prior config stays untouched on every failure by storing only after a
@@ -154,12 +159,25 @@ public final class SecretInput {
         }
     }
 
+    /**
+     * The stored secret's two validation gates: the credential contract first, then the
+     * header alphabet of the subscription token. The second gate keeps the store free of a
+     * token no HTTP header value can carry: such a token could be written, but every later
+     * invocation would refuse it at the preflight, so it is rejected where it is read.
+     */
     private static Credential credential(byte[] bytes) {
+        Credential secret;
         try {
-            return Credential.of(bytes);
+            secret = Credential.of(bytes);
         } catch (InvalidCredentialException invalid) {
             throw LocalConfigException.secretInput("the secret is rejected: it is " + invalid.reason());
         }
+        try {
+            BraveApiRequest.requireWireableToken(secret);
+        } catch (InvalidTokenException unwirable) {
+            throw LocalConfigException.secretInput("the secret is rejected: " + unwirable.getMessage());
+        }
+        return secret;
     }
 
     private static LocalConfigException stdinFailed(IOException failure) {

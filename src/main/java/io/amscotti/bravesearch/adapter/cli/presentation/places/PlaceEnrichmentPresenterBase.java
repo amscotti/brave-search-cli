@@ -6,8 +6,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.HumanListing;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceEnrichmentPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
 import io.amscotti.bravesearch.adapter.cli.presentation.WalkPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.application.service.PaginationService;
@@ -54,7 +54,7 @@ public abstract class PlaceEnrichmentPresenterBase<E>
     private static final String NOT_RETURNED_LINE = "(not returned)";
 
     protected PlaceEnrichmentPresenterBase(
-            EnvelopeCodec envelopes, JsonlCodec jsonl, SearchPresenterBase.WarningsRouter warnings) {
+            EnvelopeCodec envelopes, JsonlCodec jsonl, WarningsRouter warnings) {
         super(envelopes, jsonl, warnings, WalkCounts.REQUESTS);
     }
 

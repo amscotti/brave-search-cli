@@ -15,6 +15,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.Outcome;
+import io.amscotti.bravesearch.domain.metadata.RateLimitSnapshot;
+import io.amscotti.bravesearch.domain.metadata.RateLimitWindow;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
 import io.amscotti.bravesearch.domain.output.OutputMode;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
@@ -23,6 +25,10 @@ import io.amscotti.bravesearch.domain.result.PagedSearch;
 import io.amscotti.bravesearch.domain.result.PlaceEnrichmentResult;
 import io.amscotti.bravesearch.testsupport.SchemaCatalog;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -205,7 +211,7 @@ final class PlaceDetailsPresenterImplTest {
         assertEquals("", human.stdoutText(), "human mode buffers: no partial result payload");
         assertEquals(
                 List.of(
-                        "places.details: upstream exchange failed with status 401 (1 of 2 requests completed)"),
+                        "places.details: the Brave API rejected the API key; check the key with 'brave-search config show', or store a new one with 'brave-search config set-key' (1 of 2 requests completed)"),
                 human.stderr());
 
         Rendered json = render(run, request, machine(OutputMode.JSON, false));
@@ -264,6 +270,79 @@ final class PlaceDetailsPresenterImplTest {
         assertEquals(1, human.stderr().size());
     }
 
+    @Test
+    void aBrokenPipeWhileRenderingTheFinalDocumentIsSilentZeroAndAnyOtherWriteFailureExitsSix() {
+        List<String> silent = new ArrayList<>();
+
+        int early = presenter.present(successRun(), REQUEST, machine(OutputMode.JSON, false), document -> {
+            throw new UncheckedIOException(new IOException("Broken pipe"));
+        }, silent::add);
+
+        assertEquals(0, early, "a consumer that closed the pipe ended the run successfully");
+        assertEquals(List.of(), silent, "and nothing is diagnosed");
+
+        List<String> loud = new ArrayList<>();
+
+        int failed = presenter.present(successRun(), REQUEST, machine(OutputMode.JSON, false), document -> {
+            throw new UncheckedIOException(new IOException("No space left on device"));
+        }, loud::add);
+
+        assertEquals(6, failed, "every other write failure keeps the transport status");
+        assertEquals(List.of("places.details: writing the result document failed"), loud, "with one line");
+    }
+
+    @Test
+    void anUnparseableChunkBodyEndsJsonlInTheCountedMalformedRecordWithTheLatestWindows() {
+        PlaceEnrichmentRequest request = new PlaceEnrichmentRequest(
+                PlaceEnrichmentRequest.Kind.DETAILS, List.of("poi-a"));
+        PaginationService.PagedRun<PlaceEnrichmentResult> run = new PaginationService.PagedRun<>(
+                1,
+                List.of(new PagedSearch.Page<>(0, 1, null, resultOf(200, "<html>gateway exploded</html>", exhaustedRequestWindow()))),
+                null);
+
+        Rendered jsonl = render(run, request, machine(OutputMode.JSONL, false));
+
+        assertEquals(8, jsonl.exit(), "a 2xx chunk that is not JSON is the malformed verdict");
+        assertEquals(List.of(), jsonl.stderr(), "jsonl owns its failure explanation on stdout");
+        assertEquals(1, jsonl.stdoutText().lines().count(), "the error record ends the stream alone: " + jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"type\":\"error\""), jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"code\":\"MALFORMED_RESPONSE\""), jsonl.stdoutText());
+        assertTrue(
+                jsonl.stdoutText().contains("\"requested_requests\":1,\"received_requests\":1"),
+                "the counted framing is kept: " + jsonl.stdoutText());
+        assertTrue(
+                jsonl.stdoutText().contains("\"policy\":\"request\""),
+                "the latest completed chunk's windows ride along: " + jsonl.stdoutText());
+    }
+
+    @Test
+    void aWalkThatFailsOnARateLimitCarriesTheObservedWindowsInItsFailureRecords() {
+        // the windows are what tells an agent when a retry can succeed, so neither machine
+        // record may drop them
+        Outcome.Failure<PlaceEnrichmentResult> rateLimited = new Outcome.Failure<>(
+                FailureKind.RATE_LIMITED, "upstream exchange failed with status 429", null, exhaustedRequestWindow(), 429);
+        PaginationService.PagedRun<PlaceEnrichmentResult> run = new PaginationService.PagedRun<>(
+                2, List.of(new PagedSearch.Page<>(0, 1, null, resultOf(200, CHUNK_ONE_BODY))), rateLimited);
+
+        Rendered json = render(run, requestOfTwentyFiveIds(), machine(OutputMode.JSON, false));
+        Rendered jsonl = render(run, requestOfTwentyFiveIds(), machine(OutputMode.JSONL, false));
+
+        assertEquals(5, json.exit(), "the rate-limit kind keeps its exit status");
+        assertTrue(json.stdoutText().contains("\"code\":\"RATE_LIMITED\""), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"retryable\":true"), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"policy\":\"request\""), "the envelope keeps the windows: " + json.stdoutText());
+        assertEquals(5, jsonl.exit());
+        assertTrue(
+                jsonl.stdoutText().contains("\"policy\":\"request\""),
+                "and so does the jsonl error record: " + jsonl.stdoutText());
+    }
+
+    /** One exhausted request window, as the failing chunk's own response headers explained it. */
+    private static RateLimitSnapshot exhaustedRequestWindow() {
+        return new RateLimitSnapshot(
+                List.of(new RateLimitWindow("request", 1, 0, Duration.ofSeconds(2))), List.of(), Instant.EPOCH);
+    }
+
     private Rendered renderSuccess(OutputRequest output) {
         return render(successRun(), REQUEST, output);
     }
@@ -293,7 +372,12 @@ final class PlaceDetailsPresenterImplTest {
     }
 
     private static PlaceEnrichmentResult resultOf(int status, String body) {
-        return new PlaceEnrichmentResult(status, new UpstreamPayload(body.getBytes(UTF_8)), null, null, null, null);
+        return resultOf(status, body, null);
+    }
+
+    private static PlaceEnrichmentResult resultOf(int status, String body, RateLimitSnapshot rateLimits) {
+        return new PlaceEnrichmentResult(
+                status, new UpstreamPayload(body.getBytes(UTF_8)), rateLimits, null, null, null);
     }
 
     private Rendered render(

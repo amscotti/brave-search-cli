@@ -11,6 +11,7 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.ConfigShowRecordCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
+import io.amscotti.bravesearch.adapter.config.SecretInput;
 import io.amscotti.bravesearch.application.port.out.ConfigStore;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
@@ -22,6 +23,7 @@ import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.config.InvalidCredentialException;
 import io.amscotti.bravesearch.domain.config.LocalConfigException;
 import io.amscotti.bravesearch.domain.config.PermissionRepair;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -101,6 +103,32 @@ final class ConfigCommandsTest {
         assertEquals(3, result.exitCode(), () -> result.describe());
         assertEquals(0, store.storeCalls, "a rejected secret must never reach the store");
         assertNull(store.lastStored);
+    }
+
+    @Test
+    void setKeyRejectsATokenNoHttpHeaderCanCarryAndNeverStoresIt() {
+        String unwirable = "BSA-kappa-\u03ba";
+        // the production binding: the command's secret source is the config adapter's reader
+        SecretSource consoleReader =
+                new SecretInput(() -> Optional.of(unwirable.toCharArray()), new ByteArrayInputStream(new byte[0]))::read;
+        SecretSource stdinReader = new SecretInput(
+                Optional::empty, new ByteArrayInputStream((unwirable + "\n").getBytes(UTF_8)))::read;
+
+        for (String[] invocation : new String[][] {{"set-key"}, {"set-key", "--stdin"}}) {
+            RecordingStore store = new RecordingStore();
+            RunResult result = run(new Cli(invocation.length == 1 ? consoleReader : stdinReader, store), invocation);
+
+            assertEquals(3, result.exitCode(), () -> result.describe());
+            assertTrue(
+                    result.stderr()
+                            .contains(
+                                    "config set-key: local configuration error: the secret is rejected: subscription"
+                                            + " token carries a character an HTTP header value cannot carry"),
+                    () -> result.describe());
+            assertEquals(0, store.storeCalls, "a token no HTTP header can carry must never reach the store");
+            assertNull(store.lastStored);
+            assertNoLeak(result, unwirable);
+        }
     }
 
     @Test

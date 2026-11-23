@@ -154,7 +154,7 @@ final class WebPagedSearchPresenterImplTest {
         assertEquals(4, human.exit(), "the failed request's kind decides the exit status");
         assertEquals("", human.stdoutText(), "human mode buffers: no partial result payload");
         assertEquals(
-                List.of("web: upstream exchange failed with status 401 (1 of 3 requested pages completed)"),
+                List.of("web: the Brave API rejected the API key (HTTP 401); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key' (1 of 3 requested pages completed)"),
                 human.stderr());
 
         Rendered json = render(run, REQUEST, machine(OutputMode.JSON, false));
@@ -170,7 +170,7 @@ final class WebPagedSearchPresenterImplTest {
                 schemas.validate("envelope-error.schema.json", json.stdout()).isEmpty(),
                 "the counted failure envelope satisfies the published error schema");
         assertEquals(
-                List.of("web: upstream exchange failed with status 401 (1 of 3 requested pages completed)"),
+                List.of("web: the Brave API rejected the API key (HTTP 401); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key' (1 of 3 requested pages completed)"),
                 json.stderr());
     }
 
@@ -320,6 +320,58 @@ final class WebPagedSearchPresenterImplTest {
         run.completedPages().forEach(observer);
         int exit = presenter.present(run, request, output, results, stderr::add);
         return new Rendered(exit, stdout.toByteArray(), stderr);
+    }
+
+    @Test
+    void aBrokenPipeWhileRenderingTheFinalDocumentIsSilentZeroAndAnyOtherWriteFailureExitsSix() {
+        List<String> silent = new ArrayList<>();
+
+        int early = presenter.present(
+                successRun(),
+                REQUEST,
+                machine(OutputMode.JSON, false),
+                document -> {
+                    throw new java.io.UncheckedIOException(new java.io.IOException("Broken pipe"));
+                },
+                silent::add);
+
+        assertEquals(0, early, "a consumer that closed the pipe ended the run successfully");
+        assertTrue(silent.isEmpty(), "and nothing is diagnosed: " + silent);
+
+        List<String> loud = new ArrayList<>();
+
+        int failed = presenter.present(
+                successRun(),
+                REQUEST,
+                machine(OutputMode.JSON, false),
+                document -> {
+                    throw new java.io.UncheckedIOException(new java.io.IOException("No space left on device"));
+                },
+                loud::add);
+
+        assertEquals(6, failed, "every other write failure keeps the transport status");
+        assertEquals(1, loud.size(), "with exactly one diagnostic line: " + loud);
+        assertTrue(loud.getFirst().startsWith("web:"), loud.getFirst());
+    }
+
+    @Test
+    void anUnreadableBodyIsTheMalformedVerdictOnJsonlToo() {
+        PaginationService.PagedRun<WebSearchResult> unreadable = new PaginationService.PagedRun<>(
+                3,
+                List.of(new PagedSearch.Page<>(
+                        0, 1, null, resultOf(200, "not json at all", RateLimitSnapshot.empty(), "req-1", null))),
+                null);
+
+        Rendered json = render(unreadable, REQUEST, machine(OutputMode.JSON, false));
+        Rendered jsonl = render(unreadable, REQUEST, machine(OutputMode.JSONL, false));
+
+        assertEquals(8, json.exit, "a 2xx body that is not JSON is the malformed verdict");
+        assertTrue(json.stdoutText().contains("\"http_status\":200"), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"rate_limits\":[]"), json.stdoutText());
+        assertEquals(8, jsonl.exit, "on the streaming channel as well");
+        assertTrue(jsonl.stdoutText().contains("\"type\":\"error\""), jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"MALFORMED_RESPONSE\""), jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"requested_pages\":3"), "the counted framing is kept: " + jsonl.stdoutText());
     }
 
     private record Rendered(int exit, byte[] stdout, List<String> stderr) {

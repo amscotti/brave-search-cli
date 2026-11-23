@@ -1,6 +1,7 @@
 package io.amscotti.bravesearch.adapter.bravehttp.endpoint;
 
 import io.amscotti.bravesearch.adapter.bravehttp.BoundedBodyHandler;
+import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
 import io.amscotti.bravesearch.adapter.bravehttp.ContentEncodingDecoder;
 import io.amscotti.bravesearch.adapter.bravehttp.ResponseClassifier;
 import io.amscotti.bravesearch.adapter.bravehttp.UpstreamErrorDecoder;
@@ -11,6 +12,7 @@ import io.amscotti.bravesearch.adapter.bravehttp.sse.SemanticStreamAssembly;
 import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
 import io.amscotti.bravesearch.application.exchange.ContentCoding;
 import io.amscotti.bravesearch.application.exchange.ExchangeCancelledException;
+import io.amscotti.bravesearch.application.exchange.HttpProxy;
 import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.exchange.TotalDeadlineExceededException;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
@@ -39,9 +41,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * The Brave HTTP gateway behind {@link AnswersStreamPort}: one streaming chat-completions
@@ -84,7 +88,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * their research seconds, a wall budget of those seconds plus a 30-second grace; ordinary
  * streams carry no default wall.
  */
-public class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
+public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
 
     /** The idle window of an ordinary stream whose invocation supplied none. */
     public static final Duration DEFAULT_IDLE_TIMEOUT = Duration.ofSeconds(60);
@@ -109,18 +113,32 @@ public class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
 
     private final SemanticStreamAssembly semanticAssembly;
 
+    private final Supplier<ExecutorService> readers;
+
+    /** The proxy of each exchange, resolved when the exchange opens; empty means a direct connection. */
+    private final Supplier<Optional<HttpProxy>> proxy;
+
     /**
+     * @param readers the factory of the single-thread reader executor each open exchange
+     *     owns; the process compositions hand {@link #daemonReader()}, a test hands a
+     *     capturing factory
+     * @param proxy the proxy of each exchange, resolved when the exchange opens; the
+     *     library composition configures none
      * @throws NullPointerException when any argument is null
      */
     public BraveHttpAnswersStreamGateway(
             CancellationRegistry registry,
             Clock clock,
             ResponseLimits limits,
-            SemanticStreamAssembly semanticAssembly) {
+            SemanticStreamAssembly semanticAssembly,
+            Supplier<ExecutorService> readers,
+            Supplier<Optional<HttpProxy>> proxy) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.semanticAssembly = Objects.requireNonNull(semanticAssembly, "semanticAssembly");
+        this.readers = Objects.requireNonNull(readers, "readers");
+        this.proxy = Objects.requireNonNull(proxy, "proxy");
     }
 
     /**
@@ -135,12 +153,16 @@ public class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
     @Override
     public Outcome<AnswersStreamExchange> stream(AnswersStreamDispatch invocation) {
         Objects.requireNonNull(invocation, "invocation");
+        // resolved before anything is registered or opened: an unusable proxy value fails the
+        // open as a local-configuration error and leaves nothing behind to release
+        Optional<HttpProxy> route = proxy.get();
         CancellationContext cancellation = new CancellationContext();
         Runnable detach = registry.register(cancellation);
-        HttpClient client = HttpClient.newBuilder()
+        HttpClient.Builder building = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(invocation.connectTimeout())
-                .build();
+                .connectTimeout(invocation.connectTimeout());
+        route.ifPresent(configured -> building.proxy(BraveHttpClientFactory.proxySelector(configured)));
+        HttpClient client = building.build();
         try {
             return open(invocation, cancellation, detach, client);
         } catch (InterruptedException interrupted) {
@@ -223,7 +245,7 @@ public class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
             Duration idle,
             Instant openedAt,
             Instant wallDeadline) {
-        ExecutorService reader = newReaderExecutor();
+        ExecutorService reader = Objects.requireNonNull(readers.get(), "the reader factory answered no executor");
         AtomicReference<Instant> lastTransportActivity = new AtomicReference<>(clock.instant());
         StreamBodyPublisher rawFrames = new StreamBodyPublisher(
                 new ProgressMarkingStream(response.body(), lastTransportActivity, clock),
@@ -262,8 +284,8 @@ public class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
         return new Outcome.Success<>(exchange);
     }
 
-    /** The reader executor each open exchange owns; overridable so composition can customize threading. */
-    protected ExecutorService newReaderExecutor() {
+    /** The reader executor an open exchange owns: one daemon thread, named for its exchange. */
+    public static ExecutorService daemonReader() {
         return Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable);
             thread.setName("answers-stream-reader-" + thread.threadId());

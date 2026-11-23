@@ -56,8 +56,7 @@ final class ApiResponses {
                         exchange.apiVersion(),
                         UpstreamTree.of(upstream)));
             }
-            case Outcome.Failure<Exchange> failure -> new Outcome.Failure<>(
-                    failure.kind(), failure.diagnostic(), failure.upstream(), failure.rateLimits(), failure.httpStatus());
+            case Outcome.Failure<Exchange> failure -> failure.widen();
         };
     }
 }

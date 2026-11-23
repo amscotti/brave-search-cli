@@ -24,9 +24,9 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.VideoSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.VideoSearchExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
@@ -87,7 +87,7 @@ final class VideoSearchCommandTest {
                 "--operators",
                 "three word query");
 
-        VideoSearchDispatch dispatched = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<VideoSearchRequest> dispatched = harness.exchange.dispatches.getFirst();
         VideoSearchRequest request = dispatched.request();
         assertEquals("three word query", request.query());
         assertEquals("ALL", request.country());
@@ -336,13 +336,13 @@ final class VideoSearchCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements VideoSearchExchange {
-        final List<VideoSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<VideoSearchRequest, VideoSearchResult> {
+        final List<RemoteDispatch<VideoSearchRequest>> dispatches = new ArrayList<>();
         Outcome<VideoSearchResult> outcome = new Outcome.Success<>(
                 new VideoSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<VideoSearchResult> dispatch(VideoSearchDispatch invocation) {
+        public Outcome<VideoSearchResult> dispatch(RemoteDispatch<VideoSearchRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

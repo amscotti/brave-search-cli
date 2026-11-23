@@ -268,12 +268,12 @@ same classification.
 | 0 | — | Parse the document; zero results and a downstream closed pipe are still success — unless `result_count` is `0` with a populated `data.upstream.results`, which is the projection-miss case above. |
 | 2 | — (stderr only, stdout empty) | Usage or local validation error: fix the invocation (`--help` names the grammar); nothing was requested or spent. |
 | 3 | — (stderr only, stdout empty) | Credential missing or unsafe: export `BRAVE_API_KEY` (never as an argument) or store one with the piped `config set-key` invocation printed below. Do not retry the same shape. |
-| 4 | `AUTHENTICATION_FAILED` | Key rejected or the plan lacks the endpoint: do not retry; report the mismatch. |
+| 4 | `AUTHENTICATION_FAILED` | The API key was rejected (401, or a 422 carrying an auth code such as `SUBSCRIPTION_TOKEN_INVALID`): do not retry; tell the user to check the key with `config show` and store a valid one. A plan that lacks the endpoint is exit `7`, not `4`. |
 | 5 | `RATE_LIMITED` | Read the observed windows, wait out the largest applicable `reset_ms`, then retry **once**; never retry inside the window. |
 | 6 | `TRANSPORT_ERROR` | Network, DNS, TLS, timeout, or output I/O: retry with backoff is reasonable; check your own pipe handling first. |
-| 7 | `UPSTREAM_ERROR` | Inspect `error.upstream_code` and `error.details`; with `OPTION_NOT_IN_PLAN` (answers/context/places) the key's plan lacks the endpoint — tell the user, change nothing, do not retry. |
+| 7 | `UPSTREAM_ERROR` | In a `--output json` envelope, inspect `error.upstream_code` and `error.details`; with `OPTION_NOT_IN_PLAN` (answers/context/places) the key's plan lacks the endpoint — tell the user, change nothing, do not retry. A jsonl `error` record carries only `code`, `message`, and `retryable`: when the distinction matters, read stderr, whose one line names the cause in plain words, or rerun once with `--output json`. |
 | 8 | `MALFORMED_RESPONSE` | The response could not be trusted: report it; retrying will not change the shape. |
-| 70 | `INTERNAL_ERROR` | Unexpected tool error with one redacted stderr line: report it with the exit code. |
+| 70 | `INTERNAL_ERROR` | Unexpected tool error with one redacted stderr line: report it with the exit code. Set `BRAVE_SEARCH_DEBUG=1` and rerun to add a message-free stack trace to the report. |
 | 130/143 | `INTERRUPTED`/`TERMINATED` | A signal ended the run: stop, report the partial counts, do not fabricate a completion. |
 
 Exit 3 is fixed without ever naming the key on the command line: export `BRAVE_API_KEY`,

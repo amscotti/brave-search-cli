@@ -1,8 +1,8 @@
 package io.amscotti.bravesearch.adapter.cli.presentation.videos;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.PagedSearchPresenterBase;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
 import io.amscotti.bravesearch.adapter.cli.presentation.VideoPagedSearchPresenter;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
@@ -31,7 +31,7 @@ public final class VideoPagedSearchPresenterImpl
             EnvelopeCodec envelopes,
             JsonlCodec jsonl,
             VideoProjectionExtractor extractor,
-            SearchPresenterBase.WarningsRouter warnings) {
+            WarningsRouter warnings) {
         super(envelopes, jsonl, warnings);
         this.extractor = Objects.requireNonNull(extractor, "extractor");
     }

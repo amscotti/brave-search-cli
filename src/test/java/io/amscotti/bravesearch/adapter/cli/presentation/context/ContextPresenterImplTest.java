@@ -180,7 +180,12 @@ final class ContextPresenterImplTest {
         Rendered human = render(failure, human(false), REQUEST);
         assertEquals(4, human.exit);
         assertEquals("", human.stdoutText());
-        assertEquals("context: upstream exchange failed with status 401\n", human.stderr);
+        // the human line says what happened and what to do; the machine documents below keep
+        // the fixed diagnostic text
+        assertEquals(
+                "context: the Brave API rejected the API key (HTTP 401, code unauthorized); "
+                        + "check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'\n",
+                human.stderr);
 
         Rendered json = render(failure, machine(OutputMode.JSON, false), REQUEST);
         assertEquals(4, json.exit);

@@ -138,7 +138,7 @@ final class VideoPagedSearchPresenterImplTest {
         assertEquals(4, human.exit(), "the failed request's kind decides the exit status");
         assertEquals("", human.stdoutText(), "human mode buffers: no partial result payload");
         assertEquals(
-                List.of("videos: upstream exchange failed with status 401 (1 of 3 requested pages completed)"),
+                List.of("videos: the Brave API rejected the API key (HTTP 401); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key' (1 of 3 requested pages completed)"),
                 human.stderr());
 
         Rendered json = render(run, REQUEST, machine(OutputMode.JSON, false));

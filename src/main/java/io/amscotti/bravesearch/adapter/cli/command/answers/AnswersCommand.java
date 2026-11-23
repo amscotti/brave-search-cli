@@ -10,13 +10,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.AnswersPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.AnswersStreamPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.application.port.out.AnswersDispatch;
-import io.amscotti.bravesearch.application.port.out.AnswersExchange;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamExchange;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamPort;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.application.stream.CauseSignals;
@@ -63,8 +61,6 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
 
     /** Registration name under the root command. */
     public static final String NAME = "answers";
-
-    private final AnswersExchange exchange;
 
     private final AnswersStreamPort streams;
 
@@ -194,7 +190,7 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            AnswersExchange exchange,
+            RemoteExchange<AnswersRequest, AnswersResult> exchange,
             AnswersStreamPort streams,
             CancellationRegistry cancellations,
             AnswersPresenter presenter,
@@ -206,12 +202,12 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
         this.streams = Objects.requireNonNull(streams, "streams");
         this.cancellations = Objects.requireNonNull(cancellations, "cancellations");
         this.streamingPresenter = Objects.requireNonNull(streamingPresenter, "streamingPresenter");
@@ -289,18 +285,6 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
         return builder.build();
     }
 
-    @Override
-    protected Outcome<AnswersResult> exchange(
-            AnswersRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new AnswersDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 
     /**
      * The streaming family's own dispatch step: a stream request opens one exchange through

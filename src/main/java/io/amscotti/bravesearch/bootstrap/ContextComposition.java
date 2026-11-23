@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpContextGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.ContextEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ContextPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.context.ContextPresenterImpl;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
-import io.amscotti.bravesearch.application.port.out.ContextExchange;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.ContextRequest;
+import io.amscotti.bravesearch.domain.result.ContextResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -33,7 +31,7 @@ import java.util.function.Function;
  * non-paginated request: nothing walks pages, nothing outlives the run.
  */
 public record ContextComposition(
-        CredentialProvider loopbackTestToken, ContextExchange exchange, ContextPresenter presenter) {
+        CredentialProvider loopbackTestToken, RemoteExchange<ContextRequest, ContextResult> exchange, ContextPresenter presenter) {
 
     public ContextComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -46,27 +44,17 @@ public record ContextComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
     static ContextComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        ContextExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpContextGateway gateway = new BraveHttpContextGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static ContextComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<ContextRequest, ContextResult> exchange =
+                RemoteExchanges.blocking(ContextEndpoint::assemble, ContextResult::new, environmentLookup);
         return new ContextComposition(
                 loopbackTestToken,
                 exchange,

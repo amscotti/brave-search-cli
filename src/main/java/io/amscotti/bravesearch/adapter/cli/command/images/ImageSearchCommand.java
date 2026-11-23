@@ -8,12 +8,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ImageSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.ImageSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.ImageSearchExchange;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.request.ImageSearchRequest;
@@ -47,8 +43,6 @@ public final class ImageSearchCommand extends RemoteCommandSupport<ImageSearchRe
     /** Registration name under the root command. */
     public static final String NAME = "images";
 
-    private final ImageSearchExchange exchange;
-
     @Mixin
     CommonSearchOptions commonOptions;
 
@@ -69,7 +63,7 @@ public final class ImageSearchCommand extends RemoteCommandSupport<ImageSearchRe
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            ImageSearchExchange exchange,
+            RemoteExchange<ImageSearchRequest, ImageSearchResult> exchange,
             ImageSearchPresenter presenter,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -79,12 +73,12 @@ public final class ImageSearchCommand extends RemoteCommandSupport<ImageSearchRe
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -120,15 +114,4 @@ public final class ImageSearchCommand extends RemoteCommandSupport<ImageSearchRe
         return builder.build();
     }
 
-    @Override
-    protected Outcome<ImageSearchResult> exchange(ImageSearchRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new ImageSearchDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 }

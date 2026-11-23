@@ -10,13 +10,14 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.port.out.ConfigStore;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.WebSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.WebSearchExchange;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
+import io.amscotti.bravesearch.domain.request.WebSearchRequest;
 import io.amscotti.bravesearch.domain.result.WebSearchResult;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -49,7 +50,7 @@ final class WebSearchMainTest {
 
         assertEquals(0, result.exitCode(), () -> result.describe());
         assertEquals(1, exchange.dispatches.size());
-        WebSearchDispatch dispatch = exchange.dispatches.getFirst();
+        RemoteDispatch<WebSearchRequest> dispatch = exchange.dispatches.getFirst();
         assertEquals(BraveApiOrigin.production(), dispatch.origin());
         assertEquals(Duration.ofSeconds(30), dispatch.totalTimeout());
         assertEquals(Duration.ofSeconds(10), dispatch.connectTimeout());
@@ -131,7 +132,7 @@ final class WebSearchMainTest {
         };
     }
 
-    private WebSearchComposition webSearch(WebSearchExchange exchange, WebSearchPresenter presenter) {
+    private WebSearchComposition webSearch(RemoteExchange<WebSearchRequest, WebSearchResult> exchange, WebSearchPresenter presenter) {
         WebSearchComposition process = WebSearchComposition.process(configCompositionCredentials());
         return new WebSearchComposition(
                 failingCredentials("BRAVE_SEARCH_TEST_KEY"), exchange, presenter, process.pagination(), process.pagedPresenter());
@@ -170,7 +171,7 @@ final class WebSearchMainTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, webSearch).execute(args);
+            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webSearch)).execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {
             System.setOut(originalOut);
@@ -213,13 +214,13 @@ final class WebSearchMainTest {
         }
     }
 
-    private static final class RecordingExchange implements WebSearchExchange {
-        final List<WebSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<WebSearchRequest, WebSearchResult> {
+        final List<RemoteDispatch<WebSearchRequest>> dispatches = new ArrayList<>();
         Outcome<WebSearchResult> outcome = new Outcome.Success<>(
                 new WebSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<WebSearchResult> dispatch(WebSearchDispatch invocation) {
+        public Outcome<WebSearchResult> dispatch(RemoteDispatch<WebSearchRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

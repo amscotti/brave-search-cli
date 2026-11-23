@@ -22,6 +22,52 @@ import org.junit.jupiter.api.Test;
 final class SlicedRateWaiterTest {
 
     @Test
+    void outstandingUntilMeasuresTheResetStillOutstandingAgainstTheClock() {
+        MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_700_000_000));
+        SlicedRateWaiter waiter = new SlicedRateWaiter(clock);
+
+        assertEquals(
+                Duration.ofSeconds(90),
+                waiter.outstandingUntil(clock.instant().plus(Duration.ofSeconds(90))),
+                "the outstanding time is measured now, against the waiter's own clock");
+        assertEquals(
+                Duration.ZERO,
+                waiter.outstandingUntil(clock.instant().minus(Duration.ofSeconds(90))),
+                "a reset the run already outlived owes nothing");
+    }
+
+    @Test
+    void anInterruptEndsTheSleepAtOnceWithTheFlagRestoredForTheCaller() throws Exception {
+        MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_700_000_000));
+        SlicedRateWaiter waiter = new SlicedRateWaiter(clock);
+        java.util.concurrent.CountDownLatch sleeping = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean flagRestored = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread waiting = new Thread(() -> {
+            sleeping.countDown();
+            try {
+                // thirty seconds to wait: only the interrupt can end this promptly
+                waiter.await(clock.instant().plus(Duration.ofSeconds(30)), new CancellationContext());
+            } catch (InterruptedException interrupted) {
+                thrown.set(interrupted);
+                flagRestored.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        waiting.start();
+        assertTrue(sleeping.await(5, java.util.concurrent.TimeUnit.SECONDS), "the waiter must be asleep");
+
+        long startedAt = System.nanoTime();
+        waiting.interrupt();
+        waiting.join(java.util.concurrent.TimeUnit.SECONDS.toMillis(5));
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertFalse(waiting.isAlive(), "the interrupt ends the sleep");
+        assertTrue(elapsedMs < 2000, "promptly, not after the outstanding window: " + elapsedMs + " ms");
+        assertTrue(thrown.get() instanceof InterruptedException, "the interrupt reaches the caller as the checked signal");
+        assertTrue(flagRestored.get(), "with the thread's interrupt flag left set");
+    }
+
+    @Test
     void waitsOnlyTheResetStillOutstandingWhenTheWaitStarts() throws Exception {
         MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_700_000_000));
         SlicedRateWaiter waiter = new SlicedRateWaiter(clock);

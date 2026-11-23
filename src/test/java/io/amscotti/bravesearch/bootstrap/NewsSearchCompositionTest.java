@@ -82,11 +82,9 @@ final class NewsSearchCompositionTest {
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
             int exitCode = new Main(
-                            new ExchangeRegistry(),
-                            config,
-                            WebSearchComposition.process(storedCredentials()),
-                            ContextComposition.process(storedCredentials()),
-                            newsSearch)
+                    new ExchangeRegistry(),
+                    config,
+                    Compositions.process(storedCredentials(), new ExchangeRegistry()).withNewsSearch(newsSearch))
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

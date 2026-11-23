@@ -74,7 +74,9 @@ final class UpstreamErrorDecoderTest {
     void anAuthBearingCodeUpgradesOnlyStatusFourTwentyTwo() {
         for (String authCode : new String[] {
             "entitlement_required", "unauthorized", "InvalidAPIKey", "FORBIDDEN", "payment_required",
-            "subscription_required", "authentication_failed"
+            "subscription_required", "authentication_failed",
+            // observed live: the production origin answers a rejected key with 422 and this code
+            "SUBSCRIPTION_TOKEN_INVALID"
         }) {
             assertEquals(
                     FailureKind.AUTHENTICATION,

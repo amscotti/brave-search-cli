@@ -1,7 +1,7 @@
 package io.amscotti.bravesearch.adapter.cli.presentation.places;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDetailsPresenter;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
@@ -28,7 +28,7 @@ public final class PlaceDetailsPresenterImpl
             EnvelopeCodec envelopes,
             JsonlCodec jsonl,
             PlaceDetailsExtractor extractor,
-            SearchPresenterBase.WarningsRouter warnings) {
+            WarningsRouter warnings) {
         super(envelopes, jsonl, warnings);
         this.extractor = Objects.requireNonNull(extractor, "extractor");
     }

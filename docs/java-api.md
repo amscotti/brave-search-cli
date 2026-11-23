@@ -12,12 +12,13 @@ exported-types section is the normative source the executable architecture allow
 - Not yet published to a registry: consume the JARs from a release archive's `lib/`
   directory, or publish them locally with
   `env -u GRAALVM_HOME mise exec -- ./gradlew --no-daemon --console=plain publishToMavenLocal`
-  and depend on the coordinates (substitute the version):
+  and depend on the coordinates (the project's version, `0.1.0-SNAPSHOT` unless you pass
+`-PreleaseVersion`):
 
 ```groovy
 // Gradle
 dependencies {
-    implementation "io.amscotti:brave-search-client:1.2.0"
+    implementation "io.amscotti:brave-search-client:0.1.0-SNAPSHOT"
 }
 ```
 
@@ -26,7 +27,7 @@ dependencies {
 <dependency>
     <groupId>io.amscotti</groupId>
     <artifactId>brave-search-client</artifactId>
-    <version>1.2.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -60,10 +61,12 @@ try (BraveSearchClient client = BraveSearchClient.builder()
 
 ## Builder contract
 
-`BraveSearchClient.builder()` is the supported composition entry; its `build()` delegates
+`BraveSearchClient.builder()` is the one composition entry; its `build()` delegates
 to `api.internal.Assembler`, which instantiates the concrete adapters, so the public
 package never imports an adapter and consumers never need a transport type to get a
-working client.
+working client. The facade has no public constructor: its composition constructor takes
+one collaborator per endpoint and would break on every added endpoint as a public
+signature, so it stays package-private behind the builder.
 
 - `tokenSupplier(Supplier<Credential>)` — **required**. The library never reads the
   environment and never applies any configuration-file precedence on a consumer's behalf:
@@ -257,10 +260,14 @@ try (BraveSearchClient client = BraveSearchClient.builder()
 
 `close()` is idempotent and: cancels every live Answers stream (each handle closes
 exactly once), closes the shared transport (and through it its HTTP client), and shuts
-down the client-owned executor when the composition created one. A caller-supplied
+down the client-owned executor when the composition created one. A blocking exchange still
+in flight does not hold the close open: the transport ends it as cancelled — the in-flight
+call returns the `TRANSPORT` failure `upstream exchange cancelled` — and `close()` returns
+at once instead of waiting out that exchange's budget. A caller-supplied
 executor is never shut down. A stream or resource whose release throws never strands the
-others: every remaining release still runs and the first failure propagates from
-`close()`. An `answersStream` open that spans a concurrent `close()` never leaks a stream:
+others: every remaining release still runs, the first failure propagates from
+`close()`, and every later release failure is attached to it as a suppressed
+exception, so none is lost. An `answersStream` open that spans a concurrent `close()` never leaks a stream:
 the raced handle releases itself and the caller receives the `TRANSPORT` failure "the
 client is closed". Use after close reports that same `TRANSPORT` failure for every
 endpoint, never an exception.
@@ -271,12 +278,23 @@ Semantic versioning covers the public source and binary API and the serialized s
 the machine surfaces. The public API is exactly:
 
 - everything in `io.amscotti.bravesearch.api` except `api.internal..`;
-- the domain packages `io.amscotti.bravesearch.domain..` (requests, results, metadata,
-  error kinds and `Outcome`);
+- the domain types the public `api` package reaches, directly or transitively — exactly the
+  set `PublicApiSurfaceTest` pins: the request records with their builders, the
+  completed-exchange result records with `PagedExchange`, the metadata records, the error
+  vocabulary (`Outcome`, `FailureKind`, `ClassifiedFailure`, `UpstreamError`,
+  `UsageValidationError`), `Credential` with `InvalidCredentialException`, and `Goggle`;
 - the exported application types named in the exported-types list below, as they appear
   in the public signatures;
 - `tools.jackson.databind.JsonNode` and `tools.jackson.core.JacksonException` as they
   appear in the public signatures (the intentional public Jackson dependency).
+
+The rest of `io.amscotti.bravesearch.domain..` is CLI vocabulary that lives in the domain
+layer but never reaches a public signature — the output-channel vocabulary of
+`domain.output` and the configuration views of `domain.config` — and is internal. That is
+an executed fact rather than a convention: `PublicApiSurfaceTest` computes the reach from
+the production classes of the public `api` package, pins it as a constant allowlist, and
+fails when the reach grows or when any of that vocabulary becomes reachable, so widening
+the contract is a deliberate act performed together with this document.
 
 Every other package in the artifact — `api.internal..`, `application..` beyond the named
 exports, `adapter..`, and `bootstrap..` — is internal: a documentation-only exclusion,

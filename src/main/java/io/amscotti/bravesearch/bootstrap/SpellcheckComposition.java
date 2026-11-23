@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpSpellcheckGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.SpellcheckEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.SpellcheckPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.spellcheck.SpellcheckPre
 import io.amscotti.bravesearch.adapter.cli.presentation.spellcheck.SpellcheckProjectionExtractor;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.SpellcheckExchange;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.SpellcheckRequest;
+import io.amscotti.bravesearch.domain.result.SpellcheckSearchResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -35,7 +33,7 @@ import java.util.function.Function;
  * one invocation is exactly one GET exchange.
  */
 public record SpellcheckComposition(
-        CredentialProvider loopbackTestToken, SpellcheckExchange exchange, SpellcheckPresenter presenter) {
+        CredentialProvider loopbackTestToken, RemoteExchange<SpellcheckRequest, SpellcheckSearchResult> exchange, SpellcheckPresenter presenter) {
 
     public SpellcheckComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -48,27 +46,17 @@ public record SpellcheckComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
     static SpellcheckComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        SpellcheckExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpSpellcheckGateway gateway = new BraveHttpSpellcheckGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.spellcheck(invocation.request());
-            }
-        };
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static SpellcheckComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<SpellcheckRequest, SpellcheckSearchResult> exchange =
+                RemoteExchanges.blocking(SpellcheckEndpoint::assemble, SpellcheckSearchResult::new, environmentLookup);
         return new SpellcheckComposition(loopbackTestToken, exchange, presenter(mappers, jsonl));
     }
 

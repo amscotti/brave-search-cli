@@ -49,6 +49,12 @@ final class WebSearchProcessTest {
 
     @Test
     @Timeout(120)
+    void aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes() throws Exception {
+        WebScenarios.aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes(webCommand());
+    }
+
+    @Test
+    @Timeout(120)
     void rateLimitedJsonlErrorCarriesTheObservedWindows() throws Exception {
         WebScenarios.rateLimitedJsonlErrorCarriesTheObservedWindows(webCommand());
     }

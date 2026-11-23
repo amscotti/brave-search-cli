@@ -1,6 +1,6 @@
 package io.amscotti.bravesearch.application;
 
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpWebSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
 import picocli.CommandLine;
 
 /**
@@ -9,10 +9,10 @@ import picocli.CommandLine;
  */
 public final class ApplicationBoundaryFixture {
 
-    private final BraveHttpWebSearchGateway gateway = null;
+    private final BraveHttpTransport gateway = null;
     private final CommandLine commandLine = null;
 
-    public BraveHttpWebSearchGateway gateway() {
+    public BraveHttpTransport gateway() {
         return gateway;
     }
 

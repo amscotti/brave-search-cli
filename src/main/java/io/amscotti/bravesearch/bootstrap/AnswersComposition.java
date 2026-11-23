@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpAnswersGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.AnswersEndpoint;
 import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpAnswersStreamGateway;
 import io.amscotti.bravesearch.adapter.bravehttp.sse.BoundedEventAccumulator;
 import io.amscotti.bravesearch.adapter.cli.presentation.AnswersPresenter;
@@ -17,12 +15,15 @@ import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
+import io.amscotti.bravesearch.adapter.config.ProxyEnvironment;
 import io.amscotti.bravesearch.api.internal.StandardSemanticStream;
 import io.amscotti.bravesearch.application.exchange.ResponseLimits;
-import io.amscotti.bravesearch.application.port.out.AnswersExchange;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamPort;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
+import io.amscotti.bravesearch.domain.request.AnswersRequest;
+import io.amscotti.bravesearch.domain.result.AnswersResult;
 import java.time.Clock;
 import java.util.Objects;
 import java.util.function.Function;
@@ -47,7 +48,7 @@ import java.util.function.Function;
  */
 public record AnswersComposition(
         CredentialProvider loopbackTestToken,
-        AnswersExchange exchange,
+        RemoteExchange<AnswersRequest, AnswersResult> exchange,
         AnswersPresenter presenter,
         AnswersStreamPort streams,
         AnswersStreamPresenter streamingPresenter) {
@@ -69,35 +70,28 @@ public record AnswersComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup(), registry);
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static AnswersComposition process(
+            CredentialProvider storedCredentials, Function<String, String> environmentLookup, CancellationRegistry registry) {
+        JsonMappers mappers = new JsonMappers();
+        return process(storedCredentials, environmentLookup, registry, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and machine codecs injected. */
     static AnswersComposition process(
             CredentialProvider storedCredentials,
             Function<String, String> environmentLookup,
-            CancellationRegistry registry) {
+            CancellationRegistry registry,
+            JsonMappers mappers,
+            JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        AnswersExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpAnswersGateway gateway = new BraveHttpAnswersGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.answer(invocation.request());
-            }
-        };
-        JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        RemoteExchange<AnswersRequest, AnswersResult> exchange =
+                RemoteExchanges.blocking(AnswersEndpoint::assemble, AnswersResult::new, environmentLookup);
         return new AnswersComposition(
                 loopbackTestToken,
                 exchange,
                 presenter(mappers, jsonl),
-                streamGateway(registry),
+                streamGateway(registry, environmentLookup),
                 streamingPresenter(mappers, jsonl));
     }
 
@@ -118,9 +112,14 @@ public record AnswersComposition(
      * concrete adapters only a composition root instantiates — and one shared factory keeps
      * both roots' parser and decoder bounds identical.
      */
-    private static AnswersStreamPort streamGateway(CancellationRegistry registry) {
+    private static AnswersStreamPort streamGateway(CancellationRegistry registry, Function<String, String> environmentLookup) {
         return new BraveHttpAnswersStreamGateway(
-                registry, Clock.systemUTC(), ResponseLimits.production(), StandardSemanticStream.standard());
+                registry,
+                Clock.systemUTC(),
+                ResponseLimits.production(),
+                StandardSemanticStream.standard(),
+                BraveHttpAnswersStreamGateway::daemonReader,
+                () -> ProxyEnvironment.httpsProxy(environmentLookup));
     }
 
     /** The streaming presenter, whose buffered mode accumulates under the decoded-stream family ceiling. */

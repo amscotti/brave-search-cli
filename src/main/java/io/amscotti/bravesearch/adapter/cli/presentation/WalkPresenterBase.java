@@ -47,10 +47,9 @@ import java.util.Objects;
  * writes exactly one {@code ok:false} envelope whose {@code error.details} carries the
  * counts, and jsonl ends the already-streamed record sequence with the counted error
  * record. A request body that is not readable JSON renders as the malformed failure of
- * the mode in every parsing mode, with the same counts. Renderers of the Answers
- * streaming family are expected to reuse this skeleton wherever their channel buffers
- * the walk's documents, so the failure matrix and the counted framings stay written
- * once.
+ * the mode in every parsing mode, with the same counts. The Answers streaming renderer owns a
+ * failure matrix of its own: a stream has no walk to count, so nothing there reuses this
+ * skeleton.
  *
  * @param <TReq> the command's parsed request type
  * @param <TRes> the endpoint's completed-exchange type every walked request carries
@@ -61,11 +60,11 @@ public abstract class WalkPresenterBase<TReq, TRes extends PagedExchange> {
 
     private final EnvelopeCodec envelopes;
     private final JsonlCodec jsonl;
-    private final SearchPresenterBase.WarningsRouter warnings;
+    private final WarningsRouter warnings;
     private final WalkCounts counts;
 
     protected WalkPresenterBase(
-            EnvelopeCodec envelopes, JsonlCodec jsonl, SearchPresenterBase.WarningsRouter warnings, WalkCounts counts) {
+            EnvelopeCodec envelopes, JsonlCodec jsonl, WarningsRouter warnings, WalkCounts counts) {
         this.envelopes = Objects.requireNonNull(envelopes, "envelopes");
         this.jsonl = Objects.requireNonNull(jsonl, "jsonl");
         this.warnings = Objects.requireNonNull(warnings, "warnings");
@@ -114,7 +113,7 @@ public abstract class WalkPresenterBase<TReq, TRes extends PagedExchange> {
     }
 
     /** Opens the per-invocation mode-aware warnings channel; composition supplies the adapter. */
-    protected final SearchPresenterBase.WarningsRouter warnings() {
+    protected final WarningsRouter warnings() {
         return warnings;
     }
 
@@ -166,7 +165,7 @@ public abstract class WalkPresenterBase<TReq, TRes extends PagedExchange> {
         boolean retryable = RetryableKinds.isRetryable(failure.kind());
         String upstreamCode = failure.upstream() == null ? null : failure.upstream().code();
         RequestMeta meta = new RequestMeta(null, failure.httpStatus(), null, windowsOf(failure), null);
-        String countedDiagnostic = counted(failure.diagnostic(), run);
+        String countedDiagnostic = counted(FailureAdvice.sentence(failure), run);
         // jsonl owns its failure explanation: the error record on stdout is the whole story
         if (output.mode() != OutputMode.JSONL) {
             diagnostics.emit(countedDiagnostic);

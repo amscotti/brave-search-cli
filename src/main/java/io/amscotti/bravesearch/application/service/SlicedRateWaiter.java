@@ -27,6 +27,13 @@ public final class SlicedRateWaiter implements PaginationService.RateWaiter {
     }
 
     @Override
+    public Duration outstandingUntil(Instant resetAt) {
+        Objects.requireNonNull(resetAt, "resetAt");
+        Duration outstanding = Duration.between(clock.instant(), resetAt);
+        return outstanding.isNegative() ? Duration.ZERO : outstanding;
+    }
+
+    @Override
     public Duration await(Instant resetAt, CancellationContext cancellation) throws InterruptedException {
         Objects.requireNonNull(resetAt, "resetAt");
         Objects.requireNonNull(cancellation, "cancellation");

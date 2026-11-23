@@ -67,9 +67,11 @@ wired into `test`):
   schemas, published JARs, SBOM);
 - `releaseSbom` places the SBOM beside the archive;
 - `sha256Sums` writes `SHA256SUMS` over the release directory;
-- `io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest` (the unit test suite;
-  the build wires the packaged archive and release directory into `test` through system
-  properties after `sha256Sums`) unpacks the real archive with the platform `tar`, asserts
+- `io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest` (run by the
+  `releaseArchiveTest` task, which `check` runs; the build wires the packaged archive and
+  release directory into it through system properties after `sha256Sums`, while the plain
+  `test` task excludes this class and never needs the release artifacts) unpacks the real
+  archive with the platform `tar`, asserts
   the naming form, the single top-level directory, the executable bit of `bin/brave-search`,
   a clean `--version` run whose printed version matches the archive name, full `SHA256SUMS`
   coverage with matching digests, the runtime-only SBOM scope, the packaged machine

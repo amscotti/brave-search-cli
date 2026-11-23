@@ -30,10 +30,15 @@ public final class CredentialResolutionException extends Exception {
 
     private final Optional<String> sourceName;
 
-    private CredentialResolutionException(Category category, Optional<String> sourceName, String message) {
+    /** Whether no source at all provided a credential, as opposed to one named variable being unset. */
+    private final boolean noSourceProvided;
+
+    private CredentialResolutionException(
+            Category category, Optional<String> sourceName, boolean noSourceProvided, String message) {
         super(message);
         this.category = category;
         this.sourceName = sourceName;
+        this.noSourceProvided = noSourceProvided;
     }
 
     /**
@@ -42,7 +47,7 @@ public final class CredentialResolutionException extends Exception {
      */
     public static CredentialResolutionException missing(String searchedSources) {
         return new CredentialResolutionException(
-                Category.MISSING, Optional.empty(), "missing credential: none of " + searchedSources + " provided one");
+                Category.MISSING, Optional.empty(), true, "missing credential: none of " + searchedSources + " provided one");
     }
 
     /**
@@ -51,16 +56,25 @@ public final class CredentialResolutionException extends Exception {
      * variable the operator must provide.
      */
     public static CredentialResolutionException notSet(String variableName) {
-        return new CredentialResolutionException(Category.MISSING, Optional.empty(), variableName + " is not set");
+        return new CredentialResolutionException(
+                Category.MISSING, Optional.empty(), false, variableName + " is not set");
     }
 
     /** The present-but-invalid failure naming the source at fault and the violated invariant. */
     public static CredentialResolutionException invalid(String sourceName, String reason) {
         return new CredentialResolutionException(
-                Category.INVALID, Optional.of(sourceName), "invalid credential from " + sourceName + ": " + reason);
+                Category.INVALID, Optional.of(sourceName), false, "invalid credential from " + sourceName + ": " + reason);
     }
 
     /** Why resolution failed. */
+    /**
+     * Whether no source at all provided a credential — every configured source came back empty —
+     * as opposed to one named variable being unset or one source providing a broken value.
+     */
+    public boolean noSourceProvided() {
+        return noSourceProvided;
+    }
+
     public Category category() {
         return category;
     }

@@ -1,7 +1,9 @@
 package io.amscotti.bravesearch.adapter.cli.exit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.FailureSignal;
 import java.util.Map;
@@ -64,5 +66,20 @@ final class ExitCodeMapperTest {
     void successAndBrokenPipeBothExitZero() {
         assertEquals(0, ExitCodeMapper.SUCCESS);
         assertEquals(0, ExitCodeMapper.BROKEN_PIPE);
+    }
+
+    @Test
+    void everyStreamingTerminalCauseReadsItsExitStatusFromThisTable() {
+        // this table is the one owner of process exit statuses: the streaming latch names
+        // why a run ended and knows nothing of statuses
+        assertEquals(130, ExitCodeMapper.forCause(CancellationContext.Cause.SIGINT));
+        assertEquals(143, ExitCodeMapper.forCause(CancellationContext.Cause.SIGTERM));
+        assertEquals(0, ExitCodeMapper.forCause(CancellationContext.Cause.BROKEN_PIPE));
+        assertEquals(0, ExitCodeMapper.forCause(CancellationContext.Cause.CLOSED));
+        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.IDLE_TIMEOUT));
+        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.WALL_TIMEOUT));
+        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.SUBSCRIBER_FAILURE));
+        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.TRANSPORT_FAILURE));
+        assertThrows(NullPointerException.class, () -> ExitCodeMapper.forCause(null));
     }
 }

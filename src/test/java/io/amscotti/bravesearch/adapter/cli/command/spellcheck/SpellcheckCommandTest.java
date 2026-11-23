@@ -21,9 +21,9 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.SpellcheckDispatch;
-import io.amscotti.bravesearch.application.port.out.SpellcheckExchange;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
@@ -63,7 +63,7 @@ final class SpellcheckCommandTest {
 
         harness.run("spellcheck", "--country", "ALL", "--search-lang", "de", "three word query");
 
-        SpellcheckDispatch dispatched = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<SpellcheckRequest> dispatched = harness.exchange.dispatches.getFirst();
         SpellcheckRequest request = dispatched.request();
         assertEquals("three word query", request.query());
         assertEquals("ALL", request.country());
@@ -231,13 +231,13 @@ final class SpellcheckCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements SpellcheckExchange {
-        final List<SpellcheckDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<SpellcheckRequest, SpellcheckSearchResult> {
+        final List<RemoteDispatch<SpellcheckRequest>> dispatches = new ArrayList<>();
         Outcome<SpellcheckSearchResult> outcome = new Outcome.Success<>(
                 new SpellcheckSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<SpellcheckSearchResult> dispatch(SpellcheckDispatch invocation) {
+        public Outcome<SpellcheckSearchResult> dispatch(RemoteDispatch<SpellcheckRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

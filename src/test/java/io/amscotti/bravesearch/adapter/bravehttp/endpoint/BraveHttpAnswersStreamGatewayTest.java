@@ -2,6 +2,7 @@ package io.amscotti.bravesearch.adapter.bravehttp.endpoint;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -32,7 +33,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 
@@ -778,7 +781,9 @@ final class BraveHttpAnswersStreamGatewayTest {
     }
 
     /** The gateway under test, capturing the per-exchange reader executor it creates. */
-    private static final class CapturingGateway extends BraveHttpAnswersStreamGateway {
+    private static final class CapturingGateway {
+
+        private final BraveHttpAnswersStreamGateway gateway;
 
         private volatile ExecutorService reader;
 
@@ -789,11 +794,30 @@ final class BraveHttpAnswersStreamGatewayTest {
         CapturingGateway(
                 CancellationRegistry registry,
                 io.amscotti.bravesearch.adapter.bravehttp.sse.SemanticStreamAssembly assembly) {
-            super(
+            this(registry, assembly, java.util.Optional::empty);
+        }
+
+        /** The gateway with an injected proxy supplier: the process wiring reads the environment through it. */
+        CapturingGateway(
+                CancellationRegistry registry,
+                io.amscotti.bravesearch.adapter.bravehttp.sse.SemanticStreamAssembly assembly,
+                java.util.function.Supplier<java.util.Optional<io.amscotti.bravesearch.application.exchange.HttpProxy>> proxy) {
+            gateway = new BraveHttpAnswersStreamGateway(
                     registry,
                     Clock.systemUTC(),
                     io.amscotti.bravesearch.application.exchange.ResponseLimits.production(),
-                    assembly);
+                    assembly,
+                    () -> {
+                        ExecutorService created = BraveHttpAnswersStreamGateway.daemonReader();
+                        reader = created;
+                        return created;
+                    },
+                    proxy);
+        }
+
+        Outcome<io.amscotti.bravesearch.application.port.out.AnswersStreamExchange> stream(
+                io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch invocation) {
+            return gateway.stream(invocation);
         }
 
         /** The composition-root wiring of the semantic layer, as bootstrap will express it. */
@@ -814,16 +838,137 @@ final class BraveHttpAnswersStreamGatewayTest {
             };
         }
 
-        @Override
-        protected ExecutorService newReaderExecutor() {
-            ExecutorService created = super.newReaderExecutor();
-            reader = created;
-            return created;
+        Duration resolveIdle(AnswersRequest request) {
+            return BraveHttpAnswersStreamGateway.resolveIdle(request);
+        }
+
+        Duration resolveWall(AnswersRequest request) {
+            return BraveHttpAnswersStreamGateway.resolveWall(request);
         }
 
         boolean readerTerminated(Duration timeout) throws InterruptedException {
             ExecutorService current = reader;
             return current == null || current.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+    }
+
+    @Test
+    void aProxySupplierThatCannotResolveFailsTheOpenBeforeAnythingIsRegisteredOrOpened() throws Exception {
+        RecordingRegistry registry = new RecordingRegistry();
+        CapturingGateway gateway = new CapturingGateway(registry, CapturingGateway.compositionRootAssembly(), () -> {
+            throw io.amscotti.bravesearch.domain.config.LocalConfigException.misconfiguredProxy(
+                    "only plain http proxies are supported");
+        });
+
+        try (ScriptedSseServer server = smallEventStream()) {
+            io.amscotti.bravesearch.domain.config.LocalConfigException failure = assertThrows(
+                    io.amscotti.bravesearch.domain.config.LocalConfigException.class,
+                    () -> gateway.stream(dispatch(server, streamRequest(null, null))));
+
+            assertEquals(
+                    io.amscotti.bravesearch.domain.config.LocalConfigException.Reason.MISCONFIGURED_PROXY,
+                    failure.reason());
+            assertEquals(0, registry.live.get(), "nothing was registered: the failure predates the exchange");
+            assertEquals(0, server.requests().size(), "and nothing reached the origin");
+            assertTrue(gateway.readerTerminated(AWAIT), "no reader was ever created");
+        }
+    }
+
+    @Test
+    void aConfiguredProxyNeverComesBetweenAStreamAndItsLoopbackOrigin() throws Exception {
+        try (ScriptedSseServer server = smallEventStream()) {
+            // nothing listens on that port: a stream routed through it could never open
+            CapturingGateway gateway = new CapturingGateway(
+                    new RecordingRegistry(),
+                    CapturingGateway.compositionRootAssembly(),
+                    () -> java.util.Optional.of(new io.amscotti.bravesearch.application.exchange.HttpProxy(
+                            "127.0.0.1", 1, java.util.List.of())));
+
+            AnswersStreamExchange exchange = open(gateway, server, streamRequest(null, null));
+
+            assertEquals(1, server.requests().size(), "the loopback origin itself took the exchange");
+            exchange.close();
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void anInterruptedOpenIsATransportOutcomeThatLeavesNothingRegisteredOrRunning() throws Exception {
+        // a caller that interrupts the thread opening a stream — a timed-out wait of its own —
+        // gets an outcome like every other failed open, never an exception or a leaked exchange
+        CountDownLatch neverSendHeaders = new CountDownLatch(1);
+        RecordingRegistry registry = new RecordingRegistry();
+        CapturingGateway gateway = new CapturingGateway(registry, CapturingGateway.compositionRootAssembly());
+        AtomicReference<Outcome<AnswersStreamExchange>> outcome = new AtomicReference<>();
+        AtomicBoolean flagRestored = new AtomicBoolean();
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .holdHeadersUntil(neverSendHeaders)
+                .header("Content-Type", "text/event-stream")
+                .writeBytes(event("{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}"))
+                .start()) {
+            Thread opening = new Thread(() -> {
+                outcome.set(gateway.stream(dispatch(server, streamRequest(null, null))));
+                flagRestored.set(Thread.currentThread().isInterrupted());
+            });
+            opening.start();
+            assertTrue(server.awaitFirstRequest(AWAIT), "the open must be waiting on the origin before the interrupt");
+            long startedAt = System.nanoTime();
+
+            opening.interrupt();
+            opening.join(AWAIT.toMillis());
+
+            assertFalse(opening.isAlive(), "the interrupt ends the open at once, not at the origin's leisure");
+            Outcome.Failure<AnswersStreamExchange> interrupted = failing(outcome.get());
+            assertEquals(FailureKind.TRANSPORT, interrupted.kind());
+            assertEquals("upstream stream exchange interrupted", interrupted.diagnostic());
+            assertTrue(flagRestored.get(), "the caller's interrupt flag is left set for its own handling");
+            assertTrue(registry.awaitDetached(AWAIT), "the interrupted open detaches its context");
+            assertTrue(gateway.readerTerminated(AWAIT), "and leaves no reader behind");
+        } finally {
+            neverSendHeaders.countDown();
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void aStreamResponseWithoutAContentTypeIsMalformedAtOpenAndQuotesTheBody() throws Exception {
+        // nothing on the wire names the body an event stream, so it is refused like any other
+        // 2xx that is not one — and the diagnostic says which of the two was missing
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .statusCode(200)
+                .writeBytes("{\"not\":\"an event stream\"}".getBytes(UTF_8))
+                .start()) {
+            RecordingRegistry registry = new RecordingRegistry();
+            CapturingGateway gateway = new CapturingGateway(registry);
+
+            Outcome.Failure<AnswersStreamExchange> failure = failing(gateway.stream(dispatch(server, streamRequest(null, null))));
+
+            assertEquals(FailureKind.MALFORMED, failure.kind());
+            assertEquals(200, failure.httpStatus());
+            assertTrue(
+                    failure.diagnostic().startsWith("response content type is missing; body preview:"),
+                    failure.diagnostic());
+            assertTrue(failure.diagnostic().contains("an event stream"), "the preview quotes the body");
+            assertTrue(registry.awaitDetached(AWAIT), "the refused open detaches the context");
+            assertTrue(gateway.readerTerminated(AWAIT), "the refused open leaves no reader behind");
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void anEventStreamContentTypeWithParametersStillOpensTheStream() throws Exception {
+        // origins and proxies routinely append a charset: the media type alone decides
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .statusCode(200)
+                .header("Content-Type", "text/event-stream; charset=utf-8")
+                .writeBytes(event("{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}"))
+                .writeBytes(doneMarker())
+                .start()) {
+            AnswersStreamExchange exchange =
+                    open(new CapturingGateway(new RecordingRegistry()), server, streamRequest(null, null));
+
+            assertEquals(1, server.requests().size(), "the parameterised content type opened the exchange");
+            exchange.close();
         }
     }
 

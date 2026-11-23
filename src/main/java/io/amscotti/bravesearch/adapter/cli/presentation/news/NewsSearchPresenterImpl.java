@@ -2,6 +2,7 @@ package io.amscotti.bravesearch.adapter.cli.presentation.news;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.NewsSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.SimpleSearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;

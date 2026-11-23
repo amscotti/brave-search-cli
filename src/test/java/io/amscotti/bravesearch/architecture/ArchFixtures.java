@@ -1,16 +1,11 @@
 package io.amscotti.bravesearch.architecture;
 
 import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpWebSearchGateway;
-import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
-import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.architecture.cycle.CyclePartner;
-import io.amscotti.bravesearch.domain.config.Credential;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Constructor;
 import java.net.http.HttpClient;
 import java.util.ServiceLoader;
-import java.util.function.Supplier;
 import sun.misc.Signal;
 
 /**
@@ -28,40 +23,38 @@ public final class ArchFixtures {
      */
     public static final class ViolatesCompositionRoot {
 
-        private final BraveHttpWebSearchGateway gateway =
-                new BraveHttpWebSearchGateway(null, null, null, null, null, null);
+        private final BraveHttpTransport transport = new BraveHttpTransport(null, null, null, null);
 
-        public BraveHttpWebSearchGateway gateway() {
-            return gateway;
+        public BraveHttpTransport transport() {
+            return transport;
         }
     }
 
     /**
      * A constructor reference needs a matching functional shape; this one mirrors the
-     * gateway's six-argument constructor.
+     * transport's four-argument constructor.
      */
     @FunctionalInterface
-    private interface GatewayFactory {
+    private interface TransportFactory {
 
-        BraveHttpWebSearchGateway create(
-                BraveHttpTransport transport,
-                BraveApiOrigin origin,
-                CredentialProvider storedCredentials,
-                Supplier<Credential> loopbackTestToken,
-                java.time.Duration totalTimeout,
-                String pinnedApiVersion);
+        BraveHttpTransport create(
+                HttpClient client,
+                java.time.Duration responseHeadersTimeout,
+                io.amscotti.bravesearch.application.exchange.ResponseLimits limits,
+                java.time.Clock clock);
     }
 
     /**
-     * Rule 4 fixture: hands a concrete adapter constructor to a {@link GatewayFactory}
-     * without ever invoking it, so only a constructor-reference check can catch the wiring.
+     * Rule 4 companion fixture: acquires a concrete adapter through a constructor reference,
+     * which compiles to a constant-pool method handle the call-based rule cannot see. The
+     * fixture never executes.
      */
     public static final class ViolatesCompositionRootByReference {
 
-        private final GatewayFactory gatewaySupplier = BraveHttpWebSearchGateway::new;
+        private final TransportFactory transportFactory = BraveHttpTransport::new;
 
-        public GatewayFactory gatewaySupplier() {
-            return gatewaySupplier;
+        public TransportFactory transportFactory() {
+            return transportFactory;
         }
     }
 

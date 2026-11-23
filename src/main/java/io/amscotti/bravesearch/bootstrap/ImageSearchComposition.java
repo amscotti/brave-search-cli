@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpImageSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.ImageSearchEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ImageSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.images.ImageProjectionExtractor;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.ImageSearchExchange;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.ImageSearchRequest;
+import io.amscotti.bravesearch.domain.result.ImageSearchResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -35,7 +33,7 @@ import java.util.function.Function;
  * one invocation is exactly one GET exchange.
  */
 public record ImageSearchComposition(
-        CredentialProvider loopbackTestToken, ImageSearchExchange exchange, ImageSearchPresenter presenter) {
+        CredentialProvider loopbackTestToken, RemoteExchange<ImageSearchRequest, ImageSearchResult> exchange, ImageSearchPresenter presenter) {
 
     public ImageSearchComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -48,27 +46,17 @@ public record ImageSearchComposition(
         return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
     static ImageSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        ImageSearchExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpImageSearchGateway gateway = new BraveHttpImageSearchGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static ImageSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<ImageSearchRequest, ImageSearchResult> exchange =
+                RemoteExchanges.blocking(ImageSearchEndpoint::assemble, ImageSearchResult::new, environmentLookup);
         return new ImageSearchComposition(loopbackTestToken, exchange, presenter(mappers, jsonl));
     }
 

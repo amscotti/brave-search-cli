@@ -21,7 +21,11 @@ byte-exact), or larger than 4 KiB — ends resolution with a configuration error
 A resolved token carrying any character above U+00FF fails the same way before any
 exchange: an HTTP header value travels as ISO-8859-1 bytes, so such a token can never be
 sent, and the credential preflight rejects it with one redacted diagnostic line instead of
-letting every exchange die at request assembly. Resolution never falls back to a lower
+letting every exchange die at request assembly. `config set-key` refuses such a token at the
+same gate, before anything is stored, so a stored key is always one the preflight accepts. The same status covers an unusable
+proxy variable (see the proxy variables section of `docs/cli-contract.md`), whose
+diagnostic likewise names the rule and never the value.
+Resolution never falls back to a lower
 source, because silently ignoring an explicitly broken setting would mask the operator's
 mistake, and it is never used as-is. `config show` renders exactly this precedence,
 including which lower-precedence sources are shadowed.

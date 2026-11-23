@@ -32,7 +32,10 @@ public final class LocalConfigException extends RuntimeException {
         UNSAFE_FILESYSTEM,
 
         /** A secret could not be read: no console exists, or the input violates the one-line contract. */
-        SECRET_INPUT
+        SECRET_INPUT,
+
+        /** The proxy variable carries a value the client cannot honor. */
+        MISCONFIGURED_PROXY
     }
 
     private final Reason reason;
@@ -73,6 +76,14 @@ public final class LocalConfigException extends RuntimeException {
     /** The filesystem cannot provide the safe-access contract. */
     public static LocalConfigException unsafeFilesystem(String detail) {
         return new LocalConfigException(Reason.UNSAFE_FILESYSTEM, detail);
+    }
+
+    /**
+     * The proxy variable carries a value the client cannot honor; the detail names the rule,
+     * never the value, because a proxy address may carry credentials.
+     */
+    public static LocalConfigException misconfiguredProxy(String detail) {
+        return new LocalConfigException(Reason.MISCONFIGURED_PROXY, detail);
     }
 
     /**

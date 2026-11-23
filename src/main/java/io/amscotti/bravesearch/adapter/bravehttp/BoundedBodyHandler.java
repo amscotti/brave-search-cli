@@ -295,20 +295,19 @@ public final class BoundedBodyHandler {
     /**
      * Watches for the run's first terminal cause, then closes the body stream: a read parked
      * on a withholding peer unblocks as a break the loop reports as the typed cancelled
-     * failure — the same closing power the deadline watchdog owns. The watch polls and stops
-     * on interrupt, so a completed read never leave a parked thread behind.
+     * failure — the same closing power the deadline watchdog owns. The watcher parks on the
+     * latch itself and retires on its own interrupt, so a completed read never leaves a parked
+     * thread behind.
      */
     private static Thread cancellationWatcher(InputStream body, CancellationContext cancellation, AtomicBoolean cancelled) {
         // virtual threads are daemons by construction
         return Thread.ofVirtual()
                 .name("exchange-cancellation-watcher")
                 .unstarted(() -> {
-                    while (!cancellation.cancelled()) {
-                        try {
-                            Thread.sleep(25);
-                        } catch (InterruptedException stoppedEarly) {
-                            return;
-                        }
+                    try {
+                        cancellation.await();
+                    } catch (InterruptedException stoppedEarly) {
+                        return;
                     }
                     cancelled.set(true);
                     closeQuietly(body);
