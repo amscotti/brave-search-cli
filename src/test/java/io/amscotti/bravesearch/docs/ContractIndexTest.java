@@ -237,6 +237,7 @@ final class ContractIndexTest {
                     "RELEASE-SBOM-RUNTIME-ONLY",
                     "RELEASE-LOCAL-VERIFICATION",
                     "CI-MATRIX-AUTHORED",
+                    "CI-REPOSITORY-RETRY-BUDGET",
                     "RELEASE-TAMPER-DRILL",
                     "LIVE-WEB-PROTOCOL",
                     "LIVE-CONTEXT-PROTOCOL",

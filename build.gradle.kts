@@ -180,6 +180,12 @@ tasks.named<Test>("test") {
       excludeTags("live")
     }
   }
+  // the repository retry budget names Gradle-internal properties, and the gate pinning it
+  // inspects the running distribution: the build names that installation instead of a guess.
+  // The gate reads the budget from gradle.properties at test time, so the file is an input:
+  // editing only the budget must re-run the suite, never reuse a cached verdict
+  gradle.gradleHomeDir?.let { systemProperty("brave.search.gradle.home", it.absolutePath) }
+  inputs.file("gradle.properties")
   if (liveBraveTests) {
     // the live tests emit only bounded, redacted structural observations; surfaces them in
     // the console so an opted-in run's recorded findings are visible without report digging

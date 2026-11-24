@@ -253,6 +253,16 @@ cache, so a stale cache can never mask dependency drift or a broken artifact sou
 The heavy hosted builds and the nested sample-consumer build cap Gradle workers at two.
 Linux JVM test jobs install Zsh for the completion-script syntax checks.
 
+Resolving from a clean cache means a rate-limited repository reaches Gradle itself. Gradle
+retries a transient failure — an HTTP 429 or 5xx, a dropped connection — with a doubling
+pause, but its default budget of three attempts within three seconds is shorter than a
+rate-limit window lasts, and an exhausted budget surfaces as a plugin or artifact that "was
+not found". `gradle.properties` raises that budget to eight attempts from two seconds, about
+four minutes of trying, and keeps the span bounded so a resolution that cannot succeed still
+fails within minutes. Both settings name Gradle-internal properties, so
+`io.amscotti.bravesearch.release.RepositoryRetryBudgetTest` also checks that the running
+distribution still reads the names they are declared under.
+
 The hygiene job also executes the release resolver against offline GitHub API fixtures,
 covering valid annotated tags, commit identity, maintainer accounts, signatures, and failed
 CI checks. Run these workflow-specific tests locally with Node.js:

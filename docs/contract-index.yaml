@@ -516,6 +516,9 @@ RELEASE-LOCAL-VERIFICATION:
 CI-MATRIX-AUTHORED:
   doc: docs/release.md#ci-matrix
   test: io.amscotti.bravesearch.release.WorkflowContractTest#ciJobsMatchThePinnedRunnerMatrixAndShaPinnedActions
+CI-REPOSITORY-RETRY-BUDGET:
+  doc: docs/release.md#ci-matrix
+  test: io.amscotti.bravesearch.release.RepositoryRetryBudgetTest#theBudgetSpansMinutesWhereGradlesDefaultSpansThreeSeconds
 RELEASE-TAMPER-DRILL:
   doc: docs/release.md#local-verification
   test: io.amscotti.bravesearch.release.WorkflowContractTest#releaseWorkflowRunsTheTamperDrillBeforePublishing

@@ -21,7 +21,8 @@ final class TestTaskIndependenceTest {
 
     private static final Path BUILD_SCRIPT = Paths.get("build.gradle.kts");
 
-    private static final String TEST_TASK = "tasks.named<Test>(\"test\")";
+    /** Readable by the other build-contract gates of this package. */
+    static final String TEST_TASK = "tasks.named<Test>(\"test\")";
 
     private static final String RELEASE_TASK = "tasks.register<Test>(\"releaseArchiveTest\")";
 
@@ -84,7 +85,7 @@ final class TestTaskIndependenceTest {
      * Every brace-balanced configuration block the build script opens with {@code opener},
      * joined; a build script may configure one task in several places.
      */
-    private static String everyConfigurationBlock(String build, String opener) {
+    static String everyConfigurationBlock(String build, String opener) {
         StringBuilder joined = new StringBuilder();
         int from = 0;
         while (true) {
