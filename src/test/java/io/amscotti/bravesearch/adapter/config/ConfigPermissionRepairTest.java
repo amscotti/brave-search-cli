@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import io.amscotti.bravesearch.domain.config.LocalConfigException;
 import io.amscotti.bravesearch.domain.config.PermissionRepair;
@@ -12,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -105,6 +107,26 @@ final class ConfigPermissionRepairTest {
     }
 
     @Test
+    void repairMarksTheAdvisoryForInheritedNonOwnerEntriesAndIgnoresInheritedOwnerEntries() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        String owner = ConfigStoreHarness.processOwner().getName();
+
+        PermissionRepair inheritedNonOwner = ConfigStoreHarness.store(configPath, probeListing("""
+                        -rw-------@ 1 someone staff 62 Aug 31 10:00 config.json
+                         0: group:everyone inherited allow read
+                        """))
+                .repairPermissions();
+        PermissionRepair inheritedOwnerOnly = ConfigStoreHarness.store(configPath, probeListing(
+                        "-rw-------@ 1 someone staff 62 Aug 31 10:00 config.json\n 0: user:" + owner
+                                + " inherited allow read\n"))
+                .repairPermissions();
+
+        assertEquals(new PermissionRepair(false, false, true), inheritedNonOwner);
+        assertEquals(new PermissionRepair(false, false, false), inheritedOwnerOnly);
+    }
+
+    @Test
     void repairIgnoresAFailingOrUnavailableProbe() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
@@ -161,6 +183,133 @@ final class ConfigPermissionRepairTest {
         LocalConfigException failure =
                 assertThrows(LocalConfigException.class, () -> ConfigStoreHarness.store(configPath).repairPermissions());
         assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+    }
+
+    @Test
+    void repairRefusesAConfigFileOwnedByAnotherUserInsteadOfChmoddingIt() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        ConfigStoreHarness.chmod(configPath, "rw-r--r--");
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class,
+                () -> ConfigStoreHarness.storeSeeingAConfigFileOwnedByAnotherUser(configPath)
+                        .repairPermissions());
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("the config file is not owned by the current user"),
+                () -> failure.getMessage());
+        assertEquals(
+                PosixFilePermissions.fromString("rw-r--r--"),
+                ConfigStoreHarness.noFollowMode(configPath),
+                "a loose mode never earns a chmod on a file the process does not own");
+    }
+
+    @Test
+    void repairRefusesADirectoryAtTheConfigPathInsteadOfChmoddingIt() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Files.delete(configPath);
+        Files.createDirectory(configPath);
+
+        LocalConfigException failure =
+                assertThrows(LocalConfigException.class, () -> ConfigStoreHarness.store(configPath).repairPermissions());
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("not a regular file"), () -> failure.getMessage());
+        assertTrue(Files.isDirectory(configPath, java.nio.file.LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void theRealListingTellsAnOrdinaryFileFromOneThatGrantsAccessBeyondTheOwner() throws IOException {
+        assumeTrue(isMacOs(), "the listing probe exists for the macOS blind spot alone");
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        SecureConfigStore store = ConfigStoreHarness.store(configPath, SecureConfigStore.AclProbe.macOsListing());
+
+        assertEquals(
+                new PermissionRepair(false, false, false),
+                store.repairPermissions(),
+                "an ordinary file carries no entry beyond the owner, so nobody is warned");
+
+        assumeTrue(grantAclEntry(configPath, "everyone allow read"), "the filesystem refuses ACL entries");
+
+        assertEquals(
+                new PermissionRepair(false, false, true),
+                store.repairPermissions(),
+                "an entry the system's own listing shows beyond the owner turns into the advisory");
+    }
+
+    @Test
+    void theRealListingRaisesNoAdvisoryForAnEntryGrantedToTheOwner() throws IOException {
+        assumeTrue(isMacOs(), "the listing probe exists for the macOS blind spot alone");
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        String owner = ConfigStoreHarness.processOwner().getName();
+        assumeTrue(grantAclEntry(configPath, owner + " allow read"), "the filesystem refuses ACL entries");
+
+        SecureConfigStore.AclProbe probe = SecureConfigStore.AclProbe.macOsListing();
+        List<String> lines = probe.listing(configPath)
+                .orElseThrow(() -> new AssertionError("the real macOS listing probe must return the file listing"));
+        assertTrue(
+                lines.stream().anyMatch(line -> line.contains("user:" + owner) && line.contains("allow")),
+                () -> "the real listing must observe the granted owner ACL entry: " + lines);
+
+        PermissionRepair report = ConfigStoreHarness.store(configPath, probe).repairPermissions();
+
+        assertEquals(new PermissionRepair(false, false, false), report, "the owner's own entry is not one beyond the owner");
+    }
+
+    @Test
+    void theRealListingDetectsAnInheritedEntryBeyondTheOwner() throws IOException {
+        assumeTrue(isMacOs(), "the listing probe exists for the macOS blind spot alone");
+        Path managedDirectory = ConfigStoreHarness.managedDirectory(fabricatedHome);
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Files.createDirectories(
+                managedDirectory,
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        assumeTrue(
+                grantAclEntry(managedDirectory, "everyone allow read,file_inherit"),
+                "the filesystem refuses inheritable directory ACL entries");
+        Files.writeString(
+                configPath, ConfigStoreHarness.configDocument("token-one"), java.nio.charset.StandardCharsets.UTF_8);
+        ConfigStoreHarness.chmod(configPath, "rw-------");
+
+        SecureConfigStore.AclProbe probe = SecureConfigStore.AclProbe.macOsListing();
+        List<String> lines = probe.listing(configPath)
+                .orElseThrow(() -> new AssertionError("the real macOS listing probe must return the file listing"));
+        assertTrue(
+                lines.stream().anyMatch(line -> line.contains("inherited") && line.contains("everyone")),
+                () -> "the real listing must observe the inherited non-owner ACL entry: " + lines);
+
+        PermissionRepair report = ConfigStoreHarness.store(configPath, probe).repairPermissions();
+
+        assertEquals(
+                new PermissionRepair(false, false, true),
+                report,
+                "an inherited entry beyond the owner must raise the advisory");
+    }
+
+    private static boolean isMacOs() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+    }
+
+    /** Grants one file ACL entry through the system {@code chmod}; false when the platform refuses. */
+    private static boolean grantAclEntry(Path file, String entry) {
+        try {
+            return new ProcessBuilder("/bin/chmod", "+a", entry, file.toString())
+                            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                            .redirectError(ProcessBuilder.Redirect.DISCARD)
+                            .start()
+                            .waitFor()
+                    == 0;
+        } catch (IOException | InterruptedException unavailable) {
+            if (unavailable instanceof InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
     }
 
     /** A probe double delivering a fixed {@code ls -le}-shaped listing. */

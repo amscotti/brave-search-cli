@@ -1,9 +1,7 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpWebSearchGateway;
 import io.amscotti.bravesearch.adapter.bravehttp.endpoint.WebContinuationProbe;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.WebSearchEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebSearchPresenter;
@@ -16,11 +14,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.web.WebProjectionExtract
 import io.amscotti.bravesearch.adapter.cli.presentation.web.WebSearchPresenterImpl;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.WebSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.service.SlicedRateWaiter;
+import io.amscotti.bravesearch.domain.request.WebSearchRequest;
 import io.amscotti.bravesearch.domain.result.WebSearchResult;
 import java.time.Clock;
 import java.util.Objects;
@@ -37,12 +35,13 @@ import java.util.function.Function;
  * <p>Each dispatch is a self-contained lifecycle: the invocation's already-resolved
  * credential is handed to a fresh single-exchange gateway, whose transport and HTTP client
  * close with the gateway after the exchange, so one invocation never leaves an open client
- * behind and never resolves its credential twice. A page walk reuses that same lifecycle per
- * page, strictly sequentially.
+ * behind and never resolves its credential twice. A sequential page walk instead opens one
+ * shared transport and HTTP client across every page through {@link RemoteExchange#openWalk}
+ * and closes it when the walk finishes.
  */
 public record WebSearchComposition(
         CredentialProvider loopbackTestToken,
-        WebSearchExchange exchange,
+        RemoteExchange<WebSearchRequest, WebSearchResult> exchange,
         WebSearchPresenter presenter,
         PaginationService<WebSearchResult> pagination,
         WebPagedSearchPresenter pagedPresenter) {
@@ -56,33 +55,24 @@ public record WebSearchComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static WebSearchComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static WebSearchComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
-    static WebSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static WebSearchComposition process(Function<String, String> environmentLookup) {
+        JsonMappers mappers = new JsonMappers();
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static WebSearchComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        WebSearchExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpWebSearchGateway gateway = new BraveHttpWebSearchGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
+        RemoteExchange<WebSearchRequest, WebSearchResult> exchange =
+                RemoteExchanges.blocking(WebSearchEndpoint::assemble, WebSearchResult::new, environmentLookup);
         PaginationService<WebSearchResult> pagination =
                 new PaginationService<>(new WebContinuationProbe(), new SlicedRateWaiter(Clock.systemUTC()));
-        JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
         return new WebSearchComposition(
                 loopbackTestToken, exchange, presenter(mappers, jsonl), pagination, pagedPresenter(mappers, jsonl));
     }

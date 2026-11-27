@@ -5,14 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.amscotti.bravesearch.application.exchange.ExchangeCancelledException;
 import io.amscotti.bravesearch.application.exchange.ResponseRejectionException;
+import io.amscotti.bravesearch.application.exchange.TotalDeadlineExceededException;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -22,6 +26,11 @@ import org.junit.jupiter.api.Timeout;
  * than the applicable limit arrives, which is what cancels the JDK client's body subscription
  * and severs an oversized peer. Limits are injected, so the tests run at byte scale while
  * production uses the documented mebibyte defaults.
+ *
+ * <p>The guarded read adds two verdicts of its own. A total deadline and a cancellation latch
+ * each end the read as their typed failure however the peer behaves — parked, or trickling a
+ * byte at a time — and however the closed stream then reports itself: a clean end of stream
+ * after a guard fired is still that guard's failure, never a shorter successful body.
  */
 final class BoundedBodyHandlerTest {
 
@@ -132,6 +141,128 @@ final class BoundedBodyHandlerTest {
         assertTrue(body.closed(), "the cancellation watcher closed the withheld stream");
     }
 
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aTricklingPeerCannotOutliveTheTotalDeadlineBetweenDeliveries() {
+        // a stalled peer is cut by the watchdog while the read is parked; a peer that keeps
+        // delivering never parks long enough for that, so the deadline must be noticed here.
+        // The watchdog's single look at the clock still sees time before the deadline and
+        // keeps sleeping: only the reader's own check between deliveries can end this read
+        Instant deadline = Instant.EPOCH.plusSeconds(30);
+        TricklingStream body = new TricklingStream(() -> {});
+
+        TotalDeadlineExceededException expired = assertThrows(
+                TotalDeadlineExceededException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        body, 1024, "response exceeds decoded limit", new BudgetPassingClock(Instant.EPOCH, deadline), deadline));
+
+        assertTrue(body.closed(), "the deadline severs the trickling peer");
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aCancellationNoticedBetweenDeliveriesEndsTheReadAsCancelled() {
+        CancellationContext cancellation = new CancellationContext();
+        TricklingStream body = new TricklingStream(() -> cancellation.latch(CancellationContext.Cause.SIGINT));
+
+        ExchangeCancelledException cancelled = assertThrows(
+                ExchangeCancelledException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        body, 1024, "response exceeds decoded limit", Clock.systemUTC(), null, cancellation));
+
+        assertTrue(body.closed(), "the latch severs the peer");
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aCancellationThatSurfacesAsACleanEndOfStreamIsStillTheCancelledVerdict() throws Exception {
+        // closing a JDK response stream can end a parked read with end of stream rather than
+        // a break: without the latch's verdict the partial body would pass as a complete success
+        CancellationContext cancellation = new CancellationContext();
+        PartialThenSilentStream body = new PartialThenSilentStream(bytes(16));
+        Thread.ofVirtual().start(() -> {
+            try {
+                body.awaitParked();
+            } catch (InterruptedException parked) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            cancellation.latch(CancellationContext.Cause.SIGINT);
+        });
+
+        ExchangeCancelledException cancelled = assertThrows(
+                ExchangeCancelledException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        body, 1024, "response exceeds decoded limit", Clock.systemUTC(), null, cancellation));
+
+        assertTrue(body.closed(), "the watcher closed the stream to end the parked read");
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aDeadlineThatSurfacesAsACleanEndOfStreamIsStillTheDeadlineVerdict() {
+        Clock arrived = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
+        PartialThenSilentStream body = new PartialThenSilentStream(bytes(16));
+
+        TotalDeadlineExceededException expired = assertThrows(
+                TotalDeadlineExceededException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        body, 1024, "response exceeds decoded limit", arrived, Instant.EPOCH.plusMillis(100)));
+
+        assertTrue(body.closed(), "the watchdog closed the stream at the deadline");
+    }
+
+    @Test
+    void anUnreadableBodyPreviewsEmptyInsteadOfFailingTheRefusalItDecorates() {
+        // a preview only adorns a refusal that stands on its own, such as a classified status
+        RecordingStream broken = new RecordingStream(new IOException("connection reset"));
+
+        assertArrayEquals(new byte[0], BoundedBodyHandler.preview(broken, 1024, null, null, null));
+
+        assertTrue(broken.closedAfterBreach(), "the unreadable stream is still closed");
+    }
+
+    @Test
+    void aPreviewWithoutABudgetReadsNothingAndStillClosesTheStream() {
+        RecordingStream stream = new RecordingStream(bytes(64));
+
+        assertArrayEquals(new byte[0], BoundedBodyHandler.preview(stream, 0, null, null, null));
+
+        assertEquals(0, stream.served(), "no byte is read");
+        assertTrue(stream.closedAfterBreach(), "the stream is still closed, cancelling the subscription");
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void anAlreadyLatchedCancellationEndsAnEmptyStreamWithoutRequiringAClock() {
+        CancellationContext cancelled = new CancellationContext();
+        cancelled.latch(CancellationContext.Cause.SIGINT);
+        RecordingStream empty = new RecordingStream(new byte[0]);
+
+        assertThrows(
+                ExchangeCancelledException.class,
+                () -> BoundedBodyHandler.readBounded(empty, 1024, "response exceeds decoded limit", null, null, cancelled));
+        assertTrue(empty.closedAfterBreach(), "the stream is closed even when cancellation predates read");
+
+        RecordingStream previewBody = new RecordingStream(bytes(32));
+        byte[] preview = BoundedBodyHandler.preview(previewBody, 32, null, null, cancelled);
+        assertEquals(0, preview.length, "an already-cancelled preview reads nothing and needs no clock");
+        assertTrue(previewBody.closedAfterBreach());
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void anAlreadyExpiredDeadlineEndsAnEmptyStreamBeforeReading() {
+        Clock arrived = Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC);
+        RecordingStream empty = new RecordingStream(new byte[0]);
+
+        assertThrows(
+                TotalDeadlineExceededException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        empty, 1024, "response exceeds decoded limit", arrived, Instant.parse("2026-09-02T00:00:00Z")));
+        assertTrue(empty.closedAfterBreach());
+    }
+
     private static byte[] bytes(int count) {
         byte[] filled = new byte[count];
         for (int i = 0; i < count; i++) {
@@ -170,6 +301,10 @@ final class BoundedBodyHandlerTest {
 
         boolean closedAfterBreach() {
             return closed;
+        }
+
+        int served() {
+            return position;
         }
 
         @Override
@@ -231,6 +366,125 @@ final class BoundedBodyHandlerTest {
 
         boolean closed() {
             return closed.getCount() == 0;
+        }
+    }
+
+    /** Delivers one byte per read and never ends: the peer that keeps a read from ever parking. */
+    private static final class TricklingStream extends InputStream {
+
+        private final Runnable afterDelivery;
+        private boolean closed;
+
+        TricklingStream(Runnable afterDelivery) {
+            this.afterDelivery = afterDelivery;
+        }
+
+        boolean closed() {
+            return closed;
+        }
+
+        @Override
+        public int read() throws IOException {
+            throw new UnsupportedOperationException("the bounded reader reads in chunks");
+        }
+
+        @Override
+        public int read(byte[] target, int offset, int length) throws IOException {
+            if (closed) {
+                throw new IOException("stream is closed");
+            }
+            target[offset] = 't';
+            afterDelivery.run();
+            return 1;
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
+    }
+
+    /**
+     * Serves a prefix, then parks until closed and reports that close as a clean end of
+     * stream: the shape a JDK response stream can take when a guard closes it under a read.
+     */
+    private static final class PartialThenSilentStream extends InputStream {
+
+        private final byte[] prefix;
+        private final CountDownLatch parked = new CountDownLatch(1);
+        private final CountDownLatch closed = new CountDownLatch(1);
+        private boolean prefixServed;
+
+        PartialThenSilentStream(byte[] prefix) {
+            this.prefix = prefix;
+        }
+
+        void awaitParked() throws InterruptedException {
+            parked.await();
+        }
+
+        boolean closed() {
+            return closed.getCount() == 0;
+        }
+
+        @Override
+        public int read() throws IOException {
+            return read(new byte[1], 0, 1);
+        }
+
+        @Override
+        public int read(byte[] target, int offset, int length) throws IOException {
+            if (!prefixServed) {
+                prefixServed = true;
+                int served = Math.min(length, prefix.length);
+                System.arraycopy(prefix, 0, target, offset, served);
+                return served;
+            }
+            parked.countDown();
+            try {
+                closed.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted while parked");
+            }
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
+        }
+    }
+
+    /**
+     * A clock whose first reading still precedes the budget and every later one has passed
+     * it, whoever takes the reading — the passage of time a read that outlasts its budget
+     * observes, without depending on which thread looks first.
+     */
+    private static final class BudgetPassingClock extends Clock {
+
+        private final Instant before;
+        private final Instant after;
+        private final AtomicInteger readings = new AtomicInteger();
+
+        BudgetPassingClock(Instant before, Instant after) {
+            this.before = before;
+            this.after = after;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return readings.getAndIncrement() == 0 ? before : after;
         }
     }
 }

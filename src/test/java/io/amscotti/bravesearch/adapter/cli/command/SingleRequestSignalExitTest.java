@@ -133,7 +133,26 @@ final class SingleRequestSignalExitTest {
                 CancellationContext.Cause latchOnExchange,
                 boolean exchangeFails,
                 java.util.concurrent.atomic.AtomicReference<CancellationContext> dispatchedContextRef) {
-            super(globals, remoteOptions, stored, loopback, presenter, cancellations, results, diagnosticsFactory);
+            // the probe's exchange is the double itself: it records the run's latch, arms the
+            // scripted cause on it, and answers the scripted verdict
+            super(
+                    globals,
+                    remoteOptions,
+                    stored,
+                    loopback,
+                    invocation -> {
+                        dispatchedContextRef.set(invocation.cancellation());
+                        if (latchOnExchange != null) {
+                            invocation.cancellation().latch(latchOnExchange);
+                        }
+                        return exchangeFails
+                                ? new Outcome.Failure<>(FailureKind.TRANSPORT, "upstream exchange cancelled")
+                                : new Outcome.Success<>("done");
+                    },
+                    presenter,
+                    cancellations,
+                    results,
+                    diagnosticsFactory);
             this.latchOnExchange = latchOnExchange;
             this.exchangeFails = exchangeFails;
             this.dispatchedContextRef = dispatchedContextRef;
@@ -154,16 +173,6 @@ final class SingleRequestSignalExitTest {
             return "probe query";
         }
 
-        @Override
-        protected Outcome<String> exchange(String request, Credential credential, CancellationContext cancellation) {
-            dispatchedContextRef.set(cancellation);
-            if (latchOnExchange != null) {
-                cancellation.latch(latchOnExchange);
-            }
-            return exchangeFails
-                    ? new Outcome.Failure<>(FailureKind.TRANSPORT, "upstream exchange cancelled")
-                    : new Outcome.Success<>("done");
-        }
     }
 
     @Command(name = "brave-search", description = "Brave Search command line client for humans and autonomous agents.")

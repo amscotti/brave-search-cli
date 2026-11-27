@@ -25,7 +25,10 @@ import tools.jackson.databind.JsonNode;
  * any other status. The auth-bearing code set is small and matched after normalization
  * (lower-cased, punctuation stripped): {@code unauthorized}, {@code forbidden},
  * {@code authentication_failed}, {@code invalid_api_key}, {@code entitlement_required},
- * {@code payment_required}, {@code subscription_required}.
+ * {@code payment_required}, {@code subscription_required}, and
+ * {@code subscription_token_invalid} — the code the production origin answers a rejected key
+ * with, observed live, which is why a mistyped key is an authentication failure and never a
+ * generic upstream error.
  *
  * <p>The human diagnostic names only the status — recovery-focused by construction, quoting
  * neither the body nor the URI nor any header.
@@ -44,7 +47,8 @@ public final class UpstreamErrorDecoder {
                     "invalidapikey",
                     "entitlementrequired",
                     "paymentrequired",
-                    "subscriptionrequired");
+                    "subscriptionrequired",
+                    "subscriptiontokeninvalid");
 
     private UpstreamErrorDecoder() {}
 

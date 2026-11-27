@@ -9,12 +9,21 @@
 EXIT-CODE-TABLE:
   doc: docs/cli-contract.md#exit-codes
   test: io.amscotti.bravesearch.adapter.cli.exit.ExitCodeMapperTest#exitCodeTableCoversEveryFailureKind
+EXIT-SIGNAL-REPEATED:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.bootstrap.UserSignalsTest#aRepeatedInterruptTerminatesAtOnceWhileTheLatchedRunIsStillWindingDown
 EXIT-PRECEDENCE:
   doc: docs/cli-contract.md#failure-precedence
   test: io.amscotti.bravesearch.adapter.cli.command.SingleRequestSignalExitTest#aFailedExchangeUnderALatchedInterruptExits130
 HTTP-STATUS-CLASSIFICATION:
   doc: docs/cli-contract.md#upstream-status-classification
   test: io.amscotti.bravesearch.domain.error.HttpFailureClassificationTest#statusAloneClassifiesUpstreamFailures
+AUTH-BEARING-REJECTED-TOKEN:
+  doc: docs/brave-api-contract.md#error-decoding-and-classification
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes
+FAILURE-HUMAN-DIAGNOSTIC:
+  doc: docs/cli-contract.md#failure-rendering
+  test: io.amscotti.bravesearch.adapter.cli.presentation.FailureAdviceTest#aRejectedKeyIsNamedInPlainWordsWithTheRemedy
 OUTPUT-MODE-GRAMMAR:
   doc: docs/cli-contract.md#output-modes
   test: io.amscotti.bravesearch.adapter.cli.option.OutputModeConverterTest#rejectsEveryOtherSpelling
@@ -24,6 +33,15 @@ CLI-GLOBAL-PLACEMENT:
 CLI-GLOBAL-VERBOSE-QUIET:
   doc: docs/cli-contract.md#global-and-remote-options
   test: io.amscotti.bravesearch.adapter.cli.option.GlobalOptionsTest#verboseAndQuietAreMutuallyExclusiveInBothOrders
+CLI-GLOBAL-VERSION:
+  doc: docs/cli-contract.md#global-and-remote-options
+  test: io.amscotti.bravesearch.bootstrap.VersionFlagOnEveryCommandTest#theVersionFlagPrintsTheRootVersionLineOnEveryCommandOfTheTree
+ENV-HTTPS-PROXY:
+  doc: docs/cli-contract.md#proxy-variables
+  test: io.amscotti.bravesearch.adapter.config.ProxyEnvironmentTest#aValueTheClientCannotHonorIsAConfigurationErrorThatNeverEchoesTheValue
+ENV-PROXY-LOOPBACK-NEVER:
+  doc: docs/cli-contract.md#proxy-variables
+  test: io.amscotti.bravesearch.application.exchange.HttpProxyTest#aLoopbackTargetIsNeverProxied
 CLI-STRICT-PARSING:
   doc: docs/cli-contract.md#strict-parsing
   test: io.amscotti.bravesearch.adapter.cli.option.StrictOptionParsingTest#abbreviatedLongOptionsAreRejectedNotCompleted
@@ -47,7 +65,7 @@ MODE-COMPAT-RAW-SINGLE:
   test: io.amscotti.bravesearch.adapter.cli.option.OutputModeCompatibilityTest#rawIsRejectedForMultiRequestOperations
 PARSE-BEFORE-RENDER:
   doc: docs/cli-contract.md#parse-before-render
-  test: io.amscotti.bravesearch.domain.output.ModeGateTest#failuresBeforeModeParsingStayOnHumanDiagnostics
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#usageFailureWithOutputFlagHappensBeforeRenderingOrDispatch
 WARNINGS-ROUTING:
   doc: docs/cli-contract.md#warning-routing
   test: io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarningsTest#warningsRouteToTheChannelTheirModeOwns
@@ -92,7 +110,7 @@ API-BASE-PROTOCOL:
   test: io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransportTest#sendsTheComposedHeadersWithExactValuesOnTheWire
 API-ORIGIN-LOOPBACK:
   doc: docs/brave-api-contract.md#origin-and-loopback-credential-routing
-  test: io.amscotti.bravesearch.application.exchange.BraveApiOriginTest#storedCredentialsRouteOnlyToTheProductionOrigin
+  test: io.amscotti.bravesearch.application.port.out.CredentialProviderTest#storedCredentialsRouteOnlyToTheProductionOrigin
 API-REQUEST-ENCODING:
   doc: docs/brave-api-contract.md#request-building
   test: io.amscotti.bravesearch.adapter.bravehttp.RequestUriBuilderTest#encodesEveryKeyAndValueIndependentlyAndStrictly
@@ -189,6 +207,12 @@ PAG-PARTIAL-FAILURE:
 PAG-RATE-PACING:
   doc: docs/cli-contract.md#pagination
   test: io.amscotti.bravesearch.application.service.PaginationServiceTest#anExhaustedWindowPacesTheNextRequestUntilTheLatestExhaustedResetInstant
+PAG-RATE-PACING-ANNOUNCED:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchCommandTest#aPacingWaitIsAnnouncedOnStderrForHumansAndVerboseRunsAndQuietSilencesIt
+PAG-RATE-PACING-BOUNDED:
+  doc: docs/cli-contract.md#pagination
+  test: io.amscotti.bravesearch.application.service.PaginationServiceTest#aWaitBeyondTheMaximumPacingWaitEndsTheWalkAsRateLimitedWithoutWaiting
 WALK-EPIPE-SILENT-ZERO:
   doc: docs/cli-contract.md#pagination
   test: io.amscotti.bravesearch.adapter.cli.command.news.NewsSearchProcessTest#pagedJsonlBrokenPipeMidWalkIsSilentZero
@@ -438,6 +462,9 @@ ANS-STREAM-INCREMENTAL:
 EXIT-INTERNAL-CATCHALL:
   doc: docs/cli-contract.md#exit-codes
   test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#anUnexpectedCrashInsideACommandExitsSeventyWithOneRedactedLine
+EXIT-INTERNAL-DEBUG-TRACE:
+  doc: docs/cli-contract.md#exit-codes
+  test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#withTheDebugVariableSetAnInternalErrorAlsoPrintsATraceOfFramesAndTypesButNeverAMessage
 EXIT-INTERNAL-COMPOSITION:
   doc: docs/cli-contract.md#exit-codes
   test: io.amscotti.bravesearch.bootstrap.MainInternalErrorTest#aCompositionDefectEndsAsTheInternalStatusWithOneRedactedLine
@@ -489,6 +516,9 @@ RELEASE-LOCAL-VERIFICATION:
 CI-MATRIX-AUTHORED:
   doc: docs/release.md#ci-matrix
   test: io.amscotti.bravesearch.release.WorkflowContractTest#ciJobsMatchThePinnedRunnerMatrixAndShaPinnedActions
+CI-REPOSITORY-RETRY-BUDGET:
+  doc: docs/release.md#ci-matrix
+  test: io.amscotti.bravesearch.release.RepositoryRetryBudgetTest#theBudgetSpansMinutesWhereGradlesDefaultSpansThreeSeconds
 RELEASE-TAMPER-DRILL:
   doc: docs/release.md#local-verification
   test: io.amscotti.bravesearch.release.WorkflowContractTest#releaseWorkflowRunsTheTamperDrillBeforePublishing

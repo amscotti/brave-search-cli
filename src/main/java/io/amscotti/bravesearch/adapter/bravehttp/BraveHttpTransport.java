@@ -25,6 +25,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -65,7 +68,10 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * as its own cancelled condition, so a signal reaching a live exchange ends it promptly.
  * The transport owns the HTTP client it rides and closes it on {@link #close()}; an
  * exchange attempted afterwards reports the fixed internal failure, because the JDK client
- * signals its own closed state only through an opaque IOException message.
+ * signals its own closed state only through an opaque IOException message. Closing never
+ * waits behind a stalled exchange: every exchange in flight — with or without an injected
+ * latch — rides a cancellation context the close latches first, so the exchange unblocks and
+ * ends as cancelled and the close lands at once.
  *
  * <p>On both classified paths the exchange's rate-limit metadata is attached: the snapshot
  * parsed from the {@code X-RateLimit-*} headers against the injected {@link Clock}, so a
@@ -97,21 +103,19 @@ public final class BraveHttpTransport implements AutoCloseable {
     private volatile boolean closed;
 
     /**
+     * One identity-keyed entry per exchange in flight, so concurrent exchanges that share an
+     * injected latch never collide on removal and {@link #close()} always sees every live
+     * exchange.
+     */
+    private final Set<InFlight> inFlight = ConcurrentHashMap.newKeySet();
+
+    /**
      * @throws NullPointerException when any argument is null
      * @throws IllegalArgumentException when {@code responseHeadersTimeout} is zero or negative
      */
     public BraveHttpTransport(
             HttpClient client, Duration responseHeadersTimeout, ResponseLimits limits, Clock clock) {
-        // field assignment instead of constructor delegation: an adapter never instantiates
-        // another adapter, not even its own class through this
-        this.client = Objects.requireNonNull(client, "client");
-        this.responseHeadersTimeout = Objects.requireNonNull(responseHeadersTimeout, "responseHeadersTimeout");
-        this.limits = Objects.requireNonNull(limits, "limits");
-        this.clock = Objects.requireNonNull(clock, "clock");
-        this.cancellation = null;
-        if (responseHeadersTimeout.isZero() || responseHeadersTimeout.isNegative()) {
-            throw new IllegalArgumentException("response headers timeout must be positive");
-        }
+        this(client, responseHeadersTimeout, limits, clock, null);
     }
 
     /**
@@ -197,17 +201,29 @@ public final class BraveHttpTransport implements AutoCloseable {
 
     /**
      * The guarded exchange: runs under the lifecycle's shared read side from the closed
-     * check above through the completion below, so a close arriving mid-exchange waits
-     * for it instead of severing it, while concurrent exchanges still proceed together.
+     * check above through the completion below, so a close arriving mid-exchange cannot slip
+     * a client shutdown under a live exchange; the close ends the exchange through its
+     * cancellation context instead of waiting for it here.
      */
     private Outcome<BraveHttpResponse> exchange(
             BraveApiRequest request, HttpRequest outgoing, Instant totalDeadline) throws InterruptedException {
-        Thread interrupter = cancellationGuard();
-        boolean unwindingInterruption = false;
-        if (interrupter != null) {
-            interrupter.start();
+        // register before re-checking closed (Dekker ordering with close(): closed = true, then
+        // iterate inFlight): either this check observes closed or close() observes this entry
+        CancellationContext run = cancellation != null ? cancellation : new CancellationContext();
+        InFlight entry = new InFlight(run);
+        inFlight.add(entry);
+        if (closed) {
+            inFlight.remove(entry);
+            return new Outcome.Failure<>(FailureKind.INTERNAL, CLIENT_CLOSED_FAILURE);
         }
+        AtomicBoolean guardFired = new AtomicBoolean();
+        Thread interrupter = cancellationGuard(run, guardFired);
+        boolean unwindingInterruption = false;
+        interrupter.start();
         try {
+            if (run.cancelled()) {
+                return cancelledExchange();
+            }
             HttpResponse<InputStream> response =
                     client.send(outgoing, HttpResponse.BodyHandlers.ofInputStream());
             int status = response.statusCode();
@@ -221,7 +237,7 @@ public final class BraveHttpTransport implements AutoCloseable {
                         breachDiagnosticFor(status, coding),
                         clock,
                         totalDeadline,
-                        cancellation);
+                        run);
                 long decodeLimit =
                         status >= 200 && status <= 299 ? limits.decodedBytes() : limits.errorBytes();
                 decoded = ContentEncodingDecoder.decode(wire, coding, decodeLimit);
@@ -240,59 +256,59 @@ public final class BraveHttpTransport implements AutoCloseable {
                             decoded),
                     response.headers().map());
         } catch (IOException transportLevel) {
-            if (cancellation != null && cancellation.cancelled()) {
+            if (run.cancelled()) {
                 return cancelledExchange();
             }
             return TransportFailureMapping.of(transportLevel);
         } catch (InterruptedException interrupted) {
-            if (cancellation != null && cancellation.cancelled()) {
+            if (run.cancelled()) {
                 return cancelledExchange();
             }
             unwindingInterruption = true;
             throw interrupted;
         } finally {
-            if (interrupter != null) {
-                // stopping the guard and waiting for its exit closes the tail race: a latch
-                // firing as the exchange completes can no longer land its interrupt after
-                // the outcome exists, because the guard has left the stage for good
-                interrupter.interrupt();
+            // stopping the guard and waiting until it has exited closes the tail race: a latch
+            // firing as the exchange completes can no longer land a late interrupt after return
+            interrupter.interrupt();
+            boolean externalInterruptDuringJoin = false;
+            while (interrupter.isAlive()) {
                 try {
                     interrupter.join();
                 } catch (InterruptedException waited) {
-                    // only the guard's own tail interrupt can arrive while joining, and the
-                    // clear below resolves that flag either way
+                    externalInterruptDuringJoin = true;
                 }
             }
-            if (!unwindingInterruption) {
-                // every non-throwing return hands its caller a clean interrupt status: the
-                // guard's interrupt belongs to the exchange it armed, never to the caller
-                Thread.interrupted();
+            if (guardFired.get() || run.cancelled()) {
+                if (!unwindingInterruption) {
+                    // the guard's interrupt belongs to the cancelled exchange, never to the caller
+                    Thread.interrupted();
+                }
+            } else if (externalInterruptDuringJoin) {
+                // the guard never fired, so the interrupt observed during join belonged to the caller
+                Thread.currentThread().interrupt();
             }
+            inFlight.remove(entry);
         }
     }
 
     /**
      * The send-phase arm of a latched run: the moment the latch fires, the thread blocked
      * waiting for response headers is interrupted, because no stream exists yet for the body
-     * reader's watcher to close. The watch polls and stops on interrupt, and {@code send}
-     * stops it and waits for its exit before returning, so a completed exchange never
-     * leaves a parked guard — or the interrupt it landed — behind.
+     * reader's watcher to close. The guard parks on the latch itself and retires on its own
+     * interrupt, so a cancelled send is cut at once and a completed exchange never leaves a
+     * parked guard behind.
      */
-    private Thread cancellationGuard() {
-        if (cancellation == null) {
-            return null;
-        }
+    private Thread cancellationGuard(CancellationContext run, AtomicBoolean guardFired) {
         Thread sender = Thread.currentThread();
         return Thread.ofVirtual()
                 .name("exchange-cancellation-guard")
                 .unstarted(() -> {
-                    while (!cancellation.cancelled()) {
-                        try {
-                            Thread.sleep(25);
-                        } catch (InterruptedException stoppedEarly) {
-                            return;
-                        }
+                    try {
+                        run.await();
+                    } catch (InterruptedException stoppedEarly) {
+                        return;
                     }
+                    guardFired.set(true);
                     sender.interrupt();
                 });
     }
@@ -309,18 +325,36 @@ public final class BraveHttpTransport implements AutoCloseable {
     }
 
     /**
-     * Closes the owned HTTP client; a close arriving mid-exchange waits for its
-     * completion on the lifecycle's exclusive side, and exchanges already returned are
-     * unaffected.
+     * Closes the owned HTTP client without waiting behind a stalled exchange: the closed
+     * mark lands first, so no later exchange dispatches; every exchange already in flight
+     * (and any shared cancellation latch) has its cancellation context latched, which unblocks
+     * it and ends it as cancelled; and the lifecycle's exclusive side is then taken only
+     * briefly, to shut the client down once no exchange can still be using it.
      */
     @Override
     public void close() {
+        closed = true;
+        if (cancellation != null) {
+            cancellation.latch(CancellationContext.Cause.CLOSED);
+        }
+        for (InFlight entry : inFlight) {
+            entry.cancellation.latch(CancellationContext.Cause.CLOSED);
+        }
         lifecycle.writeLock().lock();
         try {
-            closed = true;
             client.close();
         } finally {
             lifecycle.writeLock().unlock();
+        }
+    }
+
+    /** Identity-keyed registration of one in-flight exchange's cancellation context. */
+    private static final class InFlight {
+
+        final CancellationContext cancellation;
+
+        InFlight(CancellationContext cancellation) {
+            this.cancellation = cancellation;
         }
     }
 

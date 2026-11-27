@@ -52,13 +52,6 @@ import java.util.Objects;
  */
 public abstract class SearchPresenterBase<TReq, TRes extends PagedExchange> implements SearchPresenter<TReq, TRes> {
 
-    /** Opens the per-invocation mode-aware warnings channel; composition supplies the adapter. */
-    @FunctionalInterface
-    public interface WarningsRouter {
-
-        ModeAwareWarnings open(OutputMode mode, DiagnosticsSink diagnostics, ResultWriter results, boolean quiet);
-    }
-
     private static final String UNREADABLE_BODY_DIAGNOSTIC = "upstream success body is not readable JSON";
 
     private final EnvelopeCodec envelopes;
@@ -215,7 +208,7 @@ public abstract class SearchPresenterBase<TReq, TRes extends PagedExchange> impl
         RequestMeta meta = failureMeta(failure.httpStatus(), windowsOf(failure));
         // jsonl owns its failure explanation: the error record on stdout is the whole story
         if (output.mode() != OutputMode.JSONL) {
-            diagnostics.emit(command() + ": " + failure.diagnostic());
+            diagnostics.emit(FailureAdvice.line(command(), failure));
         }
         switch (output.mode()) {
             case JSON -> results.write(

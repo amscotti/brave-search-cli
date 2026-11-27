@@ -2,27 +2,40 @@ package io.amscotti.bravesearch.api.internal;
 
 import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
 import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpAnswersGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.AnswersEndpoint;
 import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpAnswersStreamGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpContextGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpImageSearchGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpNewsSearchGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpPlaceEnrichmentGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpPlaceSearchGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpRichGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpSpellcheckGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpSuggestGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpVideoSearchGateway;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpWebSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpBlockingGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpBlockingGateway.Assembly;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpBlockingGateway.Projection;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.ContextEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.ImageSearchEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.NewsSearchEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceEnrichmentEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceSearchEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.RichEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.SpellcheckEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.SuggestEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.VideoSearchEndpoint;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.WebSearchEndpoint;
 import io.amscotti.bravesearch.adapter.bravehttp.json.UpstreamJsonCodec;
 import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.exchange.ResponseLimits;
+import io.amscotti.bravesearch.application.port.out.AnswersPort;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamExchange;
+import io.amscotti.bravesearch.application.port.out.ContextPort;
+import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.ImageSearchPort;
+import io.amscotti.bravesearch.application.port.out.NewsSearchPort;
+import io.amscotti.bravesearch.application.port.out.PlaceSearchPort;
+import io.amscotti.bravesearch.application.port.out.RichPort;
+import io.amscotti.bravesearch.application.port.out.SpellcheckPort;
+import io.amscotti.bravesearch.application.port.out.SuggestPort;
+import io.amscotti.bravesearch.application.port.out.VideoSearchPort;
+import io.amscotti.bravesearch.application.port.out.WebSearchPort;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
-import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.Outcome;
@@ -53,7 +66,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletionException;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -69,11 +82,12 @@ import tools.jackson.databind.JsonNode;
  *
  * <p>The credential travels only through the builder's explicit token supplier, resolved
  * per exchange; no environment or configuration-file precedence is ever applied here. The
- * origin is the production origin unless the builder pinned a loopback override, and the
- * origin's own routing rule keeps the supplier's credential away from any origin it did
- * not sign up for. The client owns the shared HTTP executor unless the builder supplied
- * one, and {@code close()} on the assembled client releases exactly what this composition
- * created: the live streams, the transport, and the owned executor.
+ * origin is the production origin unless the builder pinned a loopback override; the
+ * caller's own token supplier feeds both origins alike, so the caller decides what
+ * credential its supplier hands to either peer. The client owns the shared HTTP executor
+ * unless the builder supplied one, and {@code close()} on the assembled client releases
+ * exactly what this composition created: the live streams, any in-flight stream opens, the
+ * transport, and the owned executor.
  */
 public final class Assembler {
 
@@ -107,15 +121,9 @@ public final class Assembler {
         BraveApiOrigin origin = loopbackBaseUrl == null
                 ? BraveApiOrigin.production()
                 : BraveApiOrigin.fromOverride(loopbackBaseUrl, LocalhostResolver.platform());
+        // the library path has one credential source: the caller's own token supplier feeds
+        // both origins alike, so the production origin and a loopback override draw from it
         TokenSupplierCredentials storedCredentials = new TokenSupplierCredentials(tokenSupplier);
-        Supplier<Credential> loopbackTestToken = () -> {
-            try {
-                return storedCredentials.resolve();
-            } catch (CredentialResolutionException unresolved) {
-                // the gateways' library wiring carries resolution failures in this wrapper
-                throw new CompletionException(unresolved);
-            }
-        };
 
         boolean executorOwned = callerExecutor == null;
         ExecutorService executor = executorOwned ? ownedExecutor() : callerExecutor;
@@ -125,57 +133,67 @@ public final class Assembler {
                 ResponseLimits.production(),
                 Clock.systemUTC());
 
-        Function<WebSearchRequest, Outcome<WebSearchResult>> webSearch = new BraveHttpWebSearchGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<ContextRequest, Outcome<ContextResult>> llmContext = new BraveHttpContextGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<NewsSearchRequest, Outcome<NewsSearchResult>> newsSearch = new BraveHttpNewsSearchGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<VideoSearchRequest, Outcome<VideoSearchResult>> videoSearch = new BraveHttpVideoSearchGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<ImageSearchRequest, Outcome<ImageSearchResult>> imageSearch = new BraveHttpImageSearchGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<SuggestRequest, Outcome<SuggestSearchResult>> suggest = new BraveHttpSuggestGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::suggest;
-        Function<SpellcheckRequest, Outcome<SpellcheckSearchResult>> spellcheck = new BraveHttpSpellcheckGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::spellcheck;
-        Function<PlaceSearchRequest, Outcome<PlaceSearchResult>> placeSearch = new BraveHttpPlaceSearchGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::search;
-        Function<PlaceEnrichmentRequest, Outcome<PlaceEnrichmentResult>> placeEnrichment =
-                new BraveHttpPlaceEnrichmentGateway(
-                                transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                        ::fetch;
-        Function<RichRequest, Outcome<RichResult>> rich = new BraveHttpRichGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::rich;
-        Function<AnswersRequest, Outcome<AnswersResult>> answers = new BraveHttpAnswersGateway(
-                        transport, origin, storedCredentials, loopbackTestToken, totalTimeout, null)
-                ::answer;
+        // every blocking port is the one generic gateway bound to its endpoint's wire
+        // translation: the assembly is the endpoint's own, the projection the result record's
+        // constructor
+        WebSearchPort webSearch =
+                Assembler.<WebSearchRequest, WebSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, WebSearchEndpoint::assemble, WebSearchResult::new)
+                        ::exchange;
+        ContextPort llmContext =
+                Assembler.<ContextRequest, ContextResult>gateway(transport, origin, storedCredentials, totalTimeout, ContextEndpoint::assemble, ContextResult::new)
+                        ::exchange;
+        NewsSearchPort newsSearch =
+                Assembler.<NewsSearchRequest, NewsSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, NewsSearchEndpoint::assemble, NewsSearchResult::new)
+                        ::exchange;
+        VideoSearchPort videoSearch =
+                Assembler.<VideoSearchRequest, VideoSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, VideoSearchEndpoint::assemble, VideoSearchResult::new)
+                        ::exchange;
+        ImageSearchPort imageSearch =
+                Assembler.<ImageSearchRequest, ImageSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, ImageSearchEndpoint::assemble, ImageSearchResult::new)
+                        ::exchange;
+        SuggestPort suggest =
+                Assembler.<SuggestRequest, SuggestSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, SuggestEndpoint::assemble, SuggestSearchResult::new)
+                        ::exchange;
+        SpellcheckPort spellcheck = Assembler.<SpellcheckRequest, SpellcheckSearchResult>gateway(
+                        transport, origin, storedCredentials, totalTimeout, SpellcheckEndpoint::assemble, SpellcheckSearchResult::new)
+                ::exchange;
+        PlaceSearchPort placeSearch =
+                Assembler.<PlaceSearchRequest, PlaceSearchResult>gateway(transport, origin, storedCredentials, totalTimeout, PlaceSearchEndpoint::assemble, PlaceSearchResult::new)
+                        ::exchange;
+        Function<PlaceEnrichmentRequest, Outcome<PlaceEnrichmentResult>> placeEnrichment = Assembler.<PlaceEnrichmentRequest, PlaceEnrichmentResult>gateway(
+                        transport,
+                        origin,
+                        storedCredentials,
+                        totalTimeout,
+                        PlaceEnrichmentEndpoint::assemble,
+                        PlaceEnrichmentResult::new)
+                ::exchange;
+        RichPort rich = Assembler.<RichRequest, RichResult>gateway(transport, origin, storedCredentials, totalTimeout, RichEndpoint::assemble, RichResult::new)
+                ::exchange;
+        AnswersPort answers =
+                Assembler.<AnswersRequest, AnswersResult>gateway(transport, origin, storedCredentials, totalTimeout, AnswersEndpoint::assemble, AnswersResult::new)
+                        ::exchange;
+        ClientExchangeRegistry streamRegistry = new ClientExchangeRegistry();
         Function<AnswersRequest, Outcome<OpenedAnswersStream>> answersStream =
-                streamOpener(origin, storedCredentials, connectTimeout);
+                streamOpener(origin, storedCredentials, connectTimeout, executor, streamRegistry);
         Function<String, JsonNode> tagPayloadReader = UpstreamJsonCodec::readTagPayload;
 
-        List<AutoCloseable> ownedResources = executorOwned ? List.of(executor, transport) : List.of(transport);
+        // released in reverse order: cancel in-flight stream opens first, then transport, then owned executor
+        List<AutoCloseable> ownedResources = executorOwned
+                ? List.of(executor, transport, streamRegistry)
+                : List.of(transport, streamRegistry);
         return new ClientWiring(
-                webSearch,
-                llmContext,
-                newsSearch,
-                videoSearch,
-                imageSearch,
-                suggest,
-                spellcheck,
-                placeSearch,
+                webSearch::search,
+                llmContext::search,
+                newsSearch::search,
+                videoSearch::search,
+                imageSearch::search,
+                suggest::suggest,
+                spellcheck::spellcheck,
+                placeSearch::search,
                 placeEnrichment,
-                rich,
-                answers,
+                rich::rich,
+                answers::answer,
                 answersStream,
                 tagPayloadReader,
                 UpstreamJsonCodec::readTree,
@@ -205,6 +223,22 @@ public final class Assembler {
             List<AutoCloseable> ownedResources) {}
 
     /**
+     * One blocking endpoint's gateway over the shared transport: the generic gateway bound to
+     * the endpoint's wire translation, its credential resolved per exchange through the
+     * origin's routing rule.
+     */
+    private static <Req, Res> BraveHttpBlockingGateway<Req, Res> gateway(
+            BraveHttpTransport transport,
+            BraveApiOrigin origin,
+            CredentialProvider credentials,
+            Duration totalTimeout,
+            Assembly<Req> assembly,
+            Projection<Res> projection) {
+        return new BraveHttpBlockingGateway<>(
+                transport, origin, credentials, credentials, totalTimeout, null, assembly, projection);
+    }
+
+    /**
      * The streaming opener: resolve the credential for the origin, open the exchange, and
      * reduce the opened exchange to the plain pieces of {@link OpenedAnswersStream} — the
      * semantic-frames publisher plus the terminal-cause machinery behind JDK functional
@@ -212,15 +246,26 @@ public final class Assembler {
      * exchange or latch type.
      */
     private static Function<AnswersRequest, Outcome<OpenedAnswersStream>> streamOpener(
-            BraveApiOrigin origin, TokenSupplierCredentials storedCredentials, Duration connectTimeout) {
-        CancellationRegistry registry = new ClientExchangeRegistry();
+            BraveApiOrigin origin,
+            TokenSupplierCredentials storedCredentials,
+            Duration connectTimeout,
+            ExecutorService executor,
+            ClientExchangeRegistry registry) {
         BraveHttpAnswersStreamGateway gateway =
                 new BraveHttpAnswersStreamGateway(
-                        registry, Clock.systemUTC(), ResponseLimits.production(), StandardSemanticStream.standard());
+                        registry,
+                        Clock.systemUTC(),
+                        ResponseLimits.production(),
+                        StandardSemanticStream.standard(),
+                        BraveHttpAnswersStreamGateway::daemonReader,
+                        Optional::empty,
+                        executor);
         return request -> {
+            CancellationContext cancellation = new CancellationContext();
+            Runnable detach = registry.register(cancellation);
             try {
                 return switch (gateway.stream(new AnswersStreamDispatch(
-                        request, origin, storedCredentials.resolve(), connectTimeout, null))) {
+                        request, origin, storedCredentials.resolve(), connectTimeout, null, cancellation))) {
                     case Outcome.Success<AnswersStreamExchange> opened -> {
                         AnswersStreamExchange exchange = opened.value();
                         yield new Outcome.Success<>(new OpenedAnswersStream(
@@ -229,15 +274,12 @@ public final class Assembler {
                                 exchange.cancellation()::cancelled,
                                 exchange::close));
                     }
-                    case Outcome.Failure<AnswersStreamExchange> failure -> new Outcome.Failure<>(
-                            failure.kind(),
-                            failure.diagnostic(),
-                            failure.upstream(),
-                            failure.rateLimits(),
-                            failure.httpStatus());
+                    case Outcome.Failure<AnswersStreamExchange> failure -> failure.widen();
                 };
             } catch (CredentialResolutionException unresolved) {
                 return new Outcome.Failure<>(FailureKind.LOCAL_CONFIG, unresolved.getMessage());
+            } finally {
+                detach.run();
             }
         };
     }

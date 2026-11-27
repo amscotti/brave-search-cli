@@ -12,13 +12,9 @@ import io.amscotti.bravesearch.adapter.cli.option.RemoteOptions;
 import io.amscotti.bravesearch.adapter.cli.presentation.ContextPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.application.port.out.ContextDispatch;
-import io.amscotti.bravesearch.application.port.out.ContextExchange;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.request.ContextRequest;
@@ -53,8 +49,6 @@ public final class ContextCommand extends RemoteCommandSupport<ContextRequest, C
 
     /** Registration name under the root command. */
     public static final String NAME = "context";
-
-    private final ContextExchange exchange;
 
     @Mixin
     CommonSearchOptions commonOptions;
@@ -153,7 +147,7 @@ public final class ContextCommand extends RemoteCommandSupport<ContextRequest, C
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            ContextExchange exchange,
+            RemoteExchange<ContextRequest, ContextResult> exchange,
             ContextPresenter presenter,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -163,12 +157,12 @@ public final class ContextCommand extends RemoteCommandSupport<ContextRequest, C
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -188,17 +182,6 @@ public final class ContextCommand extends RemoteCommandSupport<ContextRequest, C
         return requestOf();
     }
 
-    @Override
-    protected Outcome<ContextResult> exchange(ContextRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new ContextDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 
     private ContextRequest requestOf() {
         ContextRequest.Builder builder = ContextRequest.builder(query);

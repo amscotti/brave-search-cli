@@ -1,14 +1,10 @@
 package io.amscotti.bravesearch.application.exchange;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import java.net.InetAddress;
 import java.net.URI;
@@ -16,7 +12,6 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -180,25 +175,6 @@ final class BraveApiOriginTest {
     }
 
     @Test
-    void storedCredentialsRouteOnlyToTheProductionOrigin() {
-        String storedToken = "sentinel-" + UUID.randomUUID();
-        String loopbackToken = "sentinel-" + UUID.randomUUID();
-        Supplier<Credential> storedCredentials = () -> Credential.of(storedToken.getBytes(UTF_8));
-        Supplier<Credential> loopbackTestToken = () -> Credential.of(loopbackToken.getBytes(UTF_8));
-
-        assertSame(storedCredentials, BraveApiOrigin.production().credentialSource(storedCredentials, loopbackTestToken));
-
-        BraveApiOrigin loopback = BraveApiOrigin.fromOverride(
-                "http://localhost:9", host -> List.of(InetAddress.getByName("127.0.0.1")));
-        assertSame(loopbackTestToken, loopback.credentialSource(storedCredentials, loopbackTestToken));
-        assertNotSame(storedCredentials, loopback.credentialSource(storedCredentials, loopbackTestToken));
-        assertEquals(
-                Credential.of(loopbackToken.getBytes(UTF_8)),
-                loopback.credentialSource(storedCredentials, loopbackTestToken)
-                        .get());
-    }
-
-    @Test
     void platformResolverAnswersLocalhostWithVerifiedLoopbackAddressesOnly() throws UnknownHostException {
         List<InetAddress> addresses = LocalhostResolver.platform().resolveAll("localhost");
 
@@ -212,12 +188,6 @@ final class BraveApiOriginTest {
     void nullArgumentsAreRejected() {
         assertThrows(NullPointerException.class, () -> BraveApiOrigin.fromOverride(null, LITERALS_ARE_NEVER_RESOLVED));
         assertThrows(NullPointerException.class, () -> BraveApiOrigin.fromOverride("http://127.0.0.1", null));
-        assertThrows(
-                NullPointerException.class,
-                () -> BraveApiOrigin.production().credentialSource(null, () -> null));
-        assertThrows(
-                NullPointerException.class,
-                () -> BraveApiOrigin.production().credentialSource(() -> null, null));
     }
 
     private static void assertSecretAbsentRecursively(Throwable failure, String secret) {

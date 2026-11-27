@@ -6,6 +6,7 @@ import io.amscotti.bravesearch.adapter.cli.presentation.HumanListing;
 import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
 import io.amscotti.bravesearch.adapter.cli.presentation.TerminalSafeText;
 import io.amscotti.bravesearch.adapter.cli.presentation.TextWrap;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;

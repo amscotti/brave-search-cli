@@ -1,8 +1,10 @@
 package io.amscotti.bravesearch.application.stream;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -18,42 +20,25 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class CancellationContext {
 
-    /** Why the run terminated; each cause fixes the process exit code. */
+    /** Why the run terminated; the CLI exit table derives the process status from the cause. */
     public enum Cause {
         /** The user interrupted the process; conventional shell signal exit status. */
-        SIGINT(130),
-
+        SIGINT,
         /** The user terminated the process; conventional shell signal exit status. */
-        SIGTERM(143),
-
+        SIGTERM,
         /** The consumer closed the output stream; a normal end of the stream, not a failure. */
-        BROKEN_PIPE(0),
-
+        BROKEN_PIPE,
         /** No event arrived within the allowed inactivity window. */
-        IDLE_TIMEOUT(6),
-
+        IDLE_TIMEOUT,
         /** The run exceeded its total wall-clock budget. */
-        WALL_TIMEOUT(6),
-
+        WALL_TIMEOUT,
         /** The downstream subscriber failed while consuming the stream. */
-        SUBSCRIBER_FAILURE(6),
-
+        SUBSCRIBER_FAILURE,
         /** The transport under the stream failed — a reset, truncated, or unreachable body. */
-        TRANSPORT_FAILURE(6),
+        TRANSPORT_FAILURE,
 
         /** The stream ended or was closed explicitly without another cause firing first. */
-        CLOSED(0);
-
-        private final int exitCode;
-
-        Cause(int exitCode) {
-            this.exitCode = exitCode;
-        }
-
-        /** Process exit status for this terminal cause. */
-        public int exitCode() {
-            return exitCode;
-        }
+        CLOSED;
     }
 
     private final AtomicReference<Cause> cause = new AtomicReference<>();
@@ -80,6 +65,43 @@ public final class CancellationContext {
     /** Whether a terminal cause has been latched. */
     public boolean cancelled() {
         return cause.get() != null;
+    }
+
+    /**
+     * Waits until the first latch, or until the waiting thread is interrupted. An interrupt
+     * ends the wait by throwing and latches nothing, so a watcher parked here retires on its
+     * own interrupt instead of polling the latch; the terminal cause is read through
+     * {@link #cause()} once the wait returns.
+     *
+     * @throws InterruptedException when the waiting thread is interrupted before the latch;
+     *     the interrupt status is cleared, as every checked wait leaves it
+     */
+    public void await() throws InterruptedException {
+        released.await();
+    }
+
+    /**
+     * Waits up to {@code timeout} for the first latch, or until the waiting thread is
+     * interrupted. A zero or negative timeout observes the latch immediately without parking.
+     *
+     * @return {@code true} when a cause latched before {@code timeout} elapsed, {@code false}
+     *     when the wait elapsed without a latch
+     * @throws InterruptedException when the waiting thread is interrupted before the wait ends;
+     *     the interrupt status is cleared, as every checked wait leaves it
+     * @throws NullPointerException when {@code timeout} is null
+     */
+    public boolean await(Duration timeout) throws InterruptedException {
+        Objects.requireNonNull(timeout, "timeout");
+        if (timeout.isZero() || timeout.isNegative()) {
+            return cancelled();
+        }
+        long nanos;
+        try {
+            nanos = timeout.toNanos();
+        } catch (ArithmeticException overflow) {
+            nanos = Long.MAX_VALUE;
+        }
+        return released.await(nanos, TimeUnit.NANOSECONDS);
     }
 
     /**

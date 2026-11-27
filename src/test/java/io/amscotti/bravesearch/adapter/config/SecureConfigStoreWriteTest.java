@@ -164,7 +164,7 @@ final class SecureConfigStoreWriteTest {
     }
 
     @Test
-    void storeRefusesADestinationOwnedByAnotherUser() throws IOException {
+    void storeRefusesAManagedDirectoryOwnedByAnotherUser() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
 
@@ -174,7 +174,161 @@ final class SecureConfigStoreWriteTest {
                         .store(ConfigStoreHarness.credential("token-two")));
 
         assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("the config directory is not owned by the current user"),
+                () -> "the refusal is the directory's own: " + failure.getMessage());
         assertEquals(ConfigStoreHarness.configDocument("token-one"), ConfigStoreHarness.readContent(configPath));
+    }
+
+    @Test
+    void storeRefusesToReplaceAConfigFileOwnedByAnotherUser() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        SecureConfigStore store = ConfigStoreHarness.storeSeeingAConfigFileOwnedByAnotherUser(configPath);
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class, () -> store.store(ConfigStoreHarness.credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("the config file is not owned by the current user"),
+                () -> "the refusal is the file's own: " + failure.getMessage());
+        assertEquals(ConfigStoreHarness.configDocument("token-one"), ConfigStoreHarness.readContent(configPath));
+        assertEquals(List.of("config.json"), entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)));
+    }
+
+    @Test
+    void storeFailsClosedOnAFilesystemThatCannotPinDirectoryOperationsAndWritesNothing() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class,
+                () -> ConfigStoreHarness.storeOnAnUnpinnableFilesystem(configPath)
+                        .store(ConfigStoreHarness.credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
+        assertTrue(failure.getMessage().contains("cannot pin directory operations"), () -> failure.getMessage());
+        assertEquals(ConfigStoreHarness.configDocument("token-one"), ConfigStoreHarness.readContent(configPath));
+        assertEquals(List.of("config.json"), entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)));
+    }
+
+    @Test
+    void storeRefusesAManagedPathBehindADanglingSymlinkInsteadOfWritingThroughIt() throws IOException {
+        // Application Support relocated to a volume that is not mounted right now
+        Path library = fabricatedHome.resolve("Library");
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Path unmountedTarget = fabricatedHome.resolve("Volumes/Relocated");
+        Files.createDirectories(library);
+        Files.createSymbolicLink(library.resolve("Application Support"), unmountedTarget);
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class, () -> ConfigStoreHarness.store(configPath).store(credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("exists but is not a user-owned 0700 directory"),
+                () -> failure.getMessage());
+        assertFalse(Files.exists(unmountedTarget), "nothing is created at the link's target");
+        assertTrue(Files.isSymbolicLink(library.resolve("Application Support")), "the link is left as it was");
+    }
+
+    @Test
+    void storeRefusesToClobberAConfigFileThatAppearedBehindAFirstWrite() throws IOException {
+        // a concurrent set-key, or a restore, lands a config between this write's first look
+        // and its replacement: the file that appeared is left exactly as it arrived
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Files.delete(configPath);
+        Path watchedEntry = ConfigStoreHarness.entryName(configPath);
+        AtomicInteger configViews = new AtomicInteger();
+        SecureConfigStore store = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public <V extends FileAttributeView> V getFileAttributeView(
+                                    Path entry, Class<V> type, LinkOption... options) {
+                                if (watchedEntry.equals(entry)
+                                        && type == PosixFileAttributeView.class
+                                        && configViews.incrementAndGet() == 2) {
+                                    placeConfigBehindTheWrite(configPath, "rival-token");
+                                }
+                                return delegate.getFileAttributeView(entry, type, options);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class, () -> store.store(credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("appeared during the write"), () -> failure.getMessage());
+        assertEquals(ConfigStoreHarness.configDocument("rival-token"), ConfigStoreHarness.readContent(configPath));
+        assertEquals(List.of("config.json"), entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)));
+    }
+
+    @Test
+    void storeRefusesWhenTheConfigFileVanishesBehindAWrite() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Path watchedEntry = ConfigStoreHarness.entryName(configPath);
+        AtomicInteger configViews = new AtomicInteger();
+        SecureConfigStore store = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public <V extends FileAttributeView> V getFileAttributeView(
+                                    Path entry, Class<V> type, LinkOption... options) {
+                                if (watchedEntry.equals(entry)
+                                        && type == PosixFileAttributeView.class
+                                        && configViews.incrementAndGet() == 2) {
+                                    vanishBehindTheWrite(configPath);
+                                }
+                                return delegate.getFileAttributeView(entry, type, options);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class, () -> store.store(credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("vanished during the write"), () -> failure.getMessage());
+        assertFalse(Files.exists(configPath, LinkOption.NOFOLLOW_LINKS), "the deletion is not silently undone");
+        assertEquals(List.of(), entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)));
+    }
+
+    @Test
+    void storeRefusesToInstallATemporaryFileWhoseModeWasLoosenedBehindTheWrite() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Path managedDirectory = ConfigStoreHarness.managedDirectory(fabricatedHome);
+        Path watchedEntry = ConfigStoreHarness.entryName(configPath);
+        SecureConfigStore store = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public <V extends FileAttributeView> V getFileAttributeView(
+                                    Path entry, Class<V> type, LinkOption... options) {
+                                if (!watchedEntry.equals(entry) && type == PosixFileAttributeView.class) {
+                                    // the first look at the temporary file: its mode was changed since the write
+                                    loosenModeBehindTheWrite(managedDirectory.resolve(entry));
+                                }
+                                return delegate.getFileAttributeView(entry, type, options);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(
+                LocalConfigException.class, () -> store.store(credential("token-two")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("failed its revalidation"), () -> failure.getMessage());
+        assertEquals(ConfigStoreHarness.configDocument("token-one"), ConfigStoreHarness.readContent(configPath));
+        assertEquals(List.of("config.json"), entryNames(managedDirectory));
     }
 
     @Test
@@ -248,6 +402,71 @@ final class SecureConfigStoreWriteTest {
 
         assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
         assertEquals(ConfigStoreHarness.configDocument("token-one"), ConfigStoreHarness.readContent(configPath));
+    }
+
+    @Test
+    void storeFailsClosedOnFirstWriteWhenTheHardLinkCountIsUnobservable() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        SecureConfigStore store = ConfigStoreHarness.storeWithHardLinkCounter(configPath, path -> -1L);
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, () -> store.store(credential("token-one")));
+
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
+        assertFalse(Files.exists(configPath, LinkOption.NOFOLLOW_LINKS), "no config file may be installed on refusal");
+        assertEquals(
+                List.of(),
+                entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)),
+                "the temporary file must be discarded on refusal");
+    }
+
+    @Test
+    void storeRefusesAFirstWriteWhenTheTemporaryFileGainsAnExtraHardLink() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Path managedDirectory = ConfigStoreHarness.managedDirectory(fabricatedHome);
+        Path watchedEntry = ConfigStoreHarness.entryName(configPath);
+        SecureConfigStore store = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public <V extends FileAttributeView> V getFileAttributeView(
+                                    Path entry, Class<V> type, LinkOption... options) {
+                                if (!watchedEntry.equals(entry) && type == PosixFileAttributeView.class) {
+                                    addHardLinkBehindTheWrite(
+                                            managedDirectory.resolve(entry), managedDirectory.resolve("temp-link"));
+                                }
+                                return delegate.getFileAttributeView(entry, type, options);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, () -> store.store(credential("token-one")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("hard links"), () -> failure.getMessage());
+        assertFalse(Files.exists(configPath, LinkOption.NOFOLLOW_LINKS), "no config file may be installed on refusal");
+        assertEquals(
+                List.of("temp-link"),
+                entryNames(managedDirectory),
+                "the temporary entry must be unlinked, leaving only the injected sibling");
+    }
+
+    @Test
+    void clearRefusesASymlinkedConfigFileAndLeavesTheTargetUntouched() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Path decoy = fabricatedHome.resolve("decoy.json");
+        Files.writeString(decoy, "decoy-content", StandardCharsets.UTF_8);
+        Files.createDirectories(
+                ConfigStoreHarness.managedDirectory(fabricatedHome),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        Files.createSymbolicLink(configPath, decoy);
+
+        LocalConfigException failure =
+                assertThrows(LocalConfigException.class, () -> ConfigStoreHarness.store(configPath).clear());
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertEquals("decoy-content", ConfigStoreHarness.readContent(decoy));
+        assertTrue(Files.isSymbolicLink(configPath));
     }
 
     @Test
@@ -347,6 +566,42 @@ final class SecureConfigStoreWriteTest {
         assertTrue(failure.getMessage().contains("identity"), () -> failure.getMessage());
         assertEquals(attackerDocument, ConfigStoreHarness.readContent(configPath));
         assertEquals(List.of("config.json"), entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)));
+    }
+
+    /** Lands a rival config while the store believes none exists. */
+    private static void placeConfigBehindTheWrite(Path configPath, String apiKey) {
+        try {
+            ConfigStoreHarness.writeValidConfig(configPath, apiKey);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    /** Removes the destination while the store believes it still exists. */
+    private static void vanishBehindTheWrite(Path path) {
+        try {
+            Files.delete(path);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    /** Opens a file's mode to its group while the store believes it is still owner-only. */
+    private static void loosenModeBehindTheWrite(Path file) {
+        try {
+            ConfigStoreHarness.chmod(file, "rw-r--r--");
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    /** Creates an extra hard link to the temporary file before pre-move revalidation runs. */
+    private static void addHardLinkBehindTheWrite(Path existing, Path link) {
+        try {
+            Files.createLink(link, existing);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
     }
 
     private static void swapDestinationForSymlink(Path configPath, Path decoy) {

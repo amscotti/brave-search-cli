@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpNewsSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.NewsSearchEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.NewsPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.NewsSearchPresenter;
@@ -15,11 +13,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.news.NewsProjectionExtra
 import io.amscotti.bravesearch.adapter.cli.presentation.news.NewsSearchPresenterImpl;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.NewsSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.service.SlicedRateWaiter;
+import io.amscotti.bravesearch.domain.request.NewsSearchRequest;
 import io.amscotti.bravesearch.domain.result.NewsSearchResult;
 import java.time.Clock;
 import java.util.Objects;
@@ -36,8 +34,9 @@ import java.util.function.Function;
  * <p>Each dispatch is a self-contained lifecycle: the invocation's already-resolved
  * credential is handed to a fresh single-exchange gateway, whose transport and HTTP client
  * close with the gateway after the exchange, so one invocation never leaves an open client
- * behind and never resolves its credential twice. A page walk reuses that same lifecycle per
- * page, strictly sequentially.
+ * behind and never resolves its credential twice. A sequential page walk instead opens one
+ * shared transport and HTTP client across every page through {@link RemoteExchange#openWalk}
+ * and closes it when the walk finishes.
  *
  * <p>The news walk's continuation rule: the news endpoint documents no continuation field,
  * so the orchestrator is wired with the always-continue probe — the requested page budget
@@ -46,7 +45,7 @@ import java.util.function.Function;
  */
 public record NewsSearchComposition(
         CredentialProvider loopbackTestToken,
-        NewsSearchExchange exchange,
+        RemoteExchange<NewsSearchRequest, NewsSearchResult> exchange,
         NewsSearchPresenter presenter,
         PaginationService<NewsSearchResult> pagination,
         NewsPagedSearchPresenter pagedPresenter) {
@@ -60,33 +59,24 @@ public record NewsSearchComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static NewsSearchComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static NewsSearchComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
-    static NewsSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static NewsSearchComposition process(Function<String, String> environmentLookup) {
+        JsonMappers mappers = new JsonMappers();
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static NewsSearchComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        NewsSearchExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpNewsSearchGateway gateway = new BraveHttpNewsSearchGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.search(invocation.request());
-            }
-        };
+        RemoteExchange<NewsSearchRequest, NewsSearchResult> exchange =
+                RemoteExchanges.blocking(NewsSearchEndpoint::assemble, NewsSearchResult::new, environmentLookup);
         PaginationService<NewsSearchResult> pagination =
                 new PaginationService<>(PaginationService.ContinuationProbe.alwaysContinue(), new SlicedRateWaiter(Clock.systemUTC()));
-        JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
         return new NewsSearchComposition(
                 loopbackTestToken, exchange, presenter(mappers, jsonl), pagination, pagedPresenter(mappers, jsonl));
     }

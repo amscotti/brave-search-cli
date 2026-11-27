@@ -10,13 +10,9 @@ import io.amscotti.bravesearch.adapter.cli.presentation.NewsPagedSearchPresenter
 import io.amscotti.bravesearch.adapter.cli.presentation.NewsSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.NewsSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.NewsSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
 import io.amscotti.bravesearch.domain.request.NewsSearchRequest;
@@ -51,8 +47,6 @@ public final class NewsSearchCommand extends PagedRemoteCommandSupport<NewsSearc
     /** Registration name under the root command. */
     public static final String NAME = "news";
 
-    private final NewsSearchExchange exchange;
-
     /** The news-only goggle input options; news is one of the endpoints that document Goggles. */
     @Mixin
     protected GoggleOptions goggleOptions;
@@ -85,7 +79,7 @@ public final class NewsSearchCommand extends PagedRemoteCommandSupport<NewsSearc
             GoggleOptions goggleOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            NewsSearchExchange exchange,
+            RemoteExchange<NewsSearchRequest, NewsSearchResult> exchange,
             NewsSearchPresenter presenter,
             NewsPagedSearchPresenter pagedPresenter,
             PaginationService<NewsSearchResult> pagination,
@@ -98,13 +92,13 @@ public final class NewsSearchCommand extends PagedRemoteCommandSupport<NewsSearc
                 commonOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 pagedPresenter,
                 pagination,
                 cancellations,
                 results,
                 diagnosticsFactory);
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
         this.goggleOptions = Objects.requireNonNull(goggleOptions, "goggleOptions");
     }
 
@@ -146,17 +140,6 @@ public final class NewsSearchCommand extends PagedRemoteCommandSupport<NewsSearc
                 "--spellcheck");
     }
 
-    @Override
-    protected Outcome<NewsSearchResult> exchange(NewsSearchRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new NewsSearchDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 
     @Override
     protected NewsSearchRequest requestOf() {

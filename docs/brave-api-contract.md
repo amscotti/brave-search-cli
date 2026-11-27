@@ -532,7 +532,10 @@ unintelligible and no structured fact can be drawn from it.
 
 The auth-bearing set is matched after normalization (lower-cased, punctuation stripped):
 `unauthorized`, `forbidden`, `authentication_failed`, `invalid_api_key`,
-`entitlement_required`, `payment_required`, `subscription_required`. A structured code never
+`entitlement_required`, `payment_required`, `subscription_required`,
+`subscription_token_invalid`. The last is the code the production origin answers a rejected
+key with, observed live (2026-11-23): a mistyped key is therefore an authentication failure
+(exit `4`), never a generic upstream error. A structured code never
 overrides any status other than 422 — the status is the observed fact, the body an
 interpretation. The exit mapping itself is owned by `docs/cli-contract.md`.
 

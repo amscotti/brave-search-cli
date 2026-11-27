@@ -172,12 +172,21 @@ tasks.named("check") {
 val liveBraveTests = providers.gradleProperty("liveBraveTests").map { it == "true" }.getOrElse(false)
 
 tasks.named<Test>("test") {
-  maxParallelForks = 1
+  // the live suite is serial by policy; the hermetic suite forks up to half the host cores
+  // (capped at four), because every process test owns its loopback port, its environment,
+  // and its process group
+  maxParallelForks = if (liveBraveTests) 1 else (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
   useJUnitPlatform {
     if (!liveBraveTests) {
       excludeTags("live")
     }
   }
+  // the repository retry budget names Gradle-internal properties, and the gate pinning it
+  // inspects the running distribution: the build names that installation instead of a guess.
+  // The gate reads the budget from gradle.properties at test time, so the file is an input:
+  // editing only the budget must re-run the suite, never reuse a cached verdict
+  gradle.gradleHomeDir?.let { systemProperty("brave.search.gradle.home", it.absolutePath) }
+  inputs.file("gradle.properties")
   if (liveBraveTests) {
     // the live tests emit only bounded, redacted structural observations; surfaces them in
     // the console so an opted-in run's recorded findings are visible without report digging
@@ -200,8 +209,8 @@ val jvmLauncherScript =
 // every artifact in the release directory. The host triple is a provider, so the
 // unsupported-host guard throws only at execution, never at configuration: hosts that
 // cannot cut releases (the pinned toolchains include one for windows-x64) still configure
-// every task. Their runs stop there even for a plain `test`, because the release
-// verification below is wired into the test task itself — the full suite belongs to hosts
+// every task. Their runs stop there for the release-archive verification task alone — the
+// plain test task never touches the release chain — so the full check belongs to hosts
 // with a supported macOS/Linux triple
 val releaseOs =
   providers.systemProperty("os.name").map { osName ->
@@ -227,18 +236,37 @@ val releaseArchivePath =
     releaseArchiveStem.map { stem -> directory.file("$stem.tar.gz") }
   }
 
+// the plain JVM suite runs against the installed launcher alone and leaves out the packaged
+// release-archive verification: a focused test run never builds the native image, never
+// publishes to the local Maven repository, and never needs a release archive
+val releaseArchiveVerification = "io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest"
+
 tasks.named<Test>("test") {
   dependsOn(tasks.named("installDist"))
-  dependsOn(tasks.named("sha256Sums"))
   inputs.file(jvmLauncherScript)
-  // the release artifacts under verification are declared inputs, not just task
-  // dependencies, so a stale archive or checksum file fails up-to-date checking
-  inputs.file(releaseArchivePath)
-  inputs.file(releaseDirectory.map { it.file("SHA256SUMS") })
-  // resolve the installed JVM launcher and release paths at execution time (after the
-  // producing tasks ran)
+  filter { excludeTestsMatching(releaseArchiveVerification) }
+  // resolve the installed JVM launcher path at execution time (after the producing task ran)
   doFirst {
     systemProperty("brave.search.jvm.launcher", jvmLauncherScript.get().asFile.absolutePath)
+  }
+}
+
+// the packaged release-archive verification runs the same compiled test classes as the plain
+// suite, restricted to the one class that consumes the release artifacts; that class owns
+// their task dependency and declared inputs, so a stale archive or checksum file fails its
+// up-to-date checking instead of verifying bytes nobody produced
+tasks.register<Test>("releaseArchiveTest") {
+  group = "verification"
+  description = "Verifies the packaged release archive, the checksums, and the SBOM against the release directory"
+  testClassesDirs = sourceSets["test"].output.classesDirs
+  classpath = sourceSets["test"].runtimeClasspath
+  useJUnitPlatform()
+  filter { includeTestsMatching(releaseArchiveVerification) }
+  dependsOn(tasks.named("sha256Sums"))
+  inputs.file(releaseArchivePath)
+  inputs.file(releaseDirectory.map { it.file("SHA256SUMS") })
+  // resolve the release paths at execution time (after the producing tasks ran)
+  doFirst {
     systemProperty("brave.search.release.archive", releaseArchivePath.get().asFile.absolutePath)
     systemProperty("brave.search.release.dir", releaseDirectory.get().asFile.absolutePath)
   }
@@ -437,6 +465,7 @@ val verifyMetadataComplete =
 
 tasks.named("check") {
   dependsOn(verifyMetadataComplete)
+  dependsOn(tasks.named("releaseArchiveTest"))
 }
 
 // tampered-dependency proof: a scratch resolution build resolves the same runtime coordinates

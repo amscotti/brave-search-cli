@@ -35,11 +35,16 @@ import java.util.function.Consumer;
  * means unlimited) paces the next request behind a cancellable wait that runs until the
  * latest such window's reset instant — the instant the headers were observed plus the
  * window's reset, because the upstream reset counts from the observation, never from the
- * wait — so the wait spans only the reset still outstanding when it starts. The wait the
- * waiter performed is recorded on the paced page so the output surfaces can expose it, and
- * an interrupted or cancelled wait ends the run as the transport failure with the completed
- * pages preserved; the latch is observed once more after the wait returns, so a
- * cancellation inside its final slice still stops the walk before the paced request.
+ * wait — so the wait spans only the reset still outstanding when it starts, and a reset the
+ * body read already outlived waits nothing. A wait is bounded: when the outstanding reset
+ * exceeds the walk's maximum pacing wait, the walk refuses to sleep for it and ends as a
+ * rate-limited failure that names the outstanding time — an exhausted monthly window must
+ * cost a verdict, not a month of silence. Every wait the walk does perform is announced to
+ * the {@link PacingListener} before it starts, so no wait is ever silent; the wait performed
+ * is recorded on the paced page so the output surfaces can expose it, and an interrupted or
+ * cancelled wait ends the run as the transport failure with the completed pages preserved;
+ * the latch is observed once more after the wait returns, so a cancellation inside its
+ * final slice still stops the walk before the paced request.
  *
  * <p>The first failing page aborts the run: its failure travels verbatim — kind, diagnostic,
  * upstream detail, observed windows, and status — beside the completed pages and the budget,
@@ -94,6 +99,16 @@ public final class PaginationService<R extends PagedExchange> {
     public interface RateWaiter {
 
         /**
+         * The time still outstanding until {@code resetAt}, measured now and never negative.
+         * The orchestrator measures every wait before performing any of it, so a wait longer
+         * than its maximum is refused rather than started. The default reports no outstanding
+         * time: the shape of a waiter that never waits.
+         */
+        default Duration outstandingUntil(Instant resetAt) {
+            return Duration.ZERO;
+        }
+
+        /**
          * Waits out the time until {@code resetAt}, honoring {@code cancellation}.
          *
          * @return the wait performed: the reset still outstanding at wait start, never
@@ -101,6 +116,23 @@ public final class PaginationService<R extends PagedExchange> {
          *     nothing
          */
         Duration await(Instant resetAt, CancellationContext cancellation) throws InterruptedException;
+    }
+
+    /**
+     * Hears every pacing wait before it happens, so a run never pauses without saying so.
+     * The outstanding time is what the walk is about to wait, measured before the wait.
+     */
+    @FunctionalInterface
+    public interface PacingListener {
+
+        /** A walk that announces nothing. */
+        PacingListener SILENT = (page, outstanding) -> {};
+
+        /**
+         * @param page the user-facing page the wait precedes
+         * @param outstanding the wait about to be performed
+         */
+        void waitingForReset(int page, Duration outstanding);
     }
 
     /**
@@ -140,12 +172,30 @@ public final class PaginationService<R extends PagedExchange> {
         }
     }
 
+    /** The longest pacing wait a walk performs unless its composition pins another: one minute. */
+    public static final Duration DEFAULT_MAXIMUM_PACING_WAIT = Duration.ofSeconds(60);
+
     private final ContinuationProbe continuation;
     private final RateWaiter waiter;
+    private final Duration maximumPacingWait;
 
     public PaginationService(ContinuationProbe continuation, RateWaiter waiter) {
+        this(continuation, waiter, DEFAULT_MAXIMUM_PACING_WAIT);
+    }
+
+    /**
+     * @param maximumPacingWait the longest pacing wait the walk performs; a wait whose
+     *     outstanding part exceeds it ends the walk as a rate-limited failure instead
+     * @throws NullPointerException when {@code maximumPacingWait} is null
+     * @throws IllegalArgumentException when {@code maximumPacingWait} is negative
+     */
+    public PaginationService(ContinuationProbe continuation, RateWaiter waiter, Duration maximumPacingWait) {
         this.continuation = Objects.requireNonNull(continuation, "continuation");
         this.waiter = Objects.requireNonNull(waiter, "waiter");
+        if (maximumPacingWait.isNegative()) {
+            throw new IllegalArgumentException("maximum pacing wait must not be negative");
+        }
+        this.maximumPacingWait = maximumPacingWait;
     }
 
     /**
@@ -162,7 +212,21 @@ public final class PaginationService<R extends PagedExchange> {
             int requestedPages,
             CancellationContext cancellation,
             Consumer<PagedSearch.Page<R>> observer) {
+        return fetchAll(fetcher, requestedPages, cancellation, observer, PacingListener.SILENT);
+    }
+
+    /**
+     * Walks the pages of one invocation sequentially, announcing every pacing wait to
+     * {@code pacing} before it happens.
+     */
+    public PagedRun<R> fetchAll(
+            PageFetcher<R> fetcher,
+            int requestedPages,
+            CancellationContext cancellation,
+            Consumer<PagedSearch.Page<R>> observer,
+            PacingListener pacing) {
         Objects.requireNonNull(fetcher, "fetcher");
+        Objects.requireNonNull(pacing, "pacing");
         Objects.requireNonNull(cancellation, "cancellation");
         Objects.requireNonNull(observer, "observer");
         if (requestedPages < 1 || requestedPages > PagedSearch.MAX_PAGE) {
@@ -177,6 +241,24 @@ public final class PaginationService<R extends PagedExchange> {
                 }
                 Instant pacingResetAt = latestExhaustedResetAtOf(pages.getLast());
                 if (pacingResetAt != null) {
+                    // the wait is measured before any of it happens: too long a wait is a
+                    // verdict, never a sleep, and every wait that follows is announced first
+                    Duration outstanding = waiter.outstandingUntil(pacingResetAt);
+                    if (outstanding.compareTo(maximumPacingWait) > 0) {
+                        return stopped(
+                                pages,
+                                requestedPages,
+                                FailureKind.RATE_LIMITED,
+                                "the rate-limit window resets in "
+                                        + ceilingSeconds(outstanding)
+                                        + "s, beyond this walk's maximum wait of "
+                                        + maximumPacingWait.toSeconds()
+                                        + "s; retry after the reset",
+                                pages.getLast().result().rateLimits());
+                    }
+                    if (outstanding.toMillis() > 0) {
+                        pacing.waitingForReset(page, outstanding);
+                    }
                     try {
                         pacingWait = waiter.await(pacingResetAt, cancellation);
                     } catch (InterruptedException interrupted) {
@@ -237,8 +319,28 @@ public final class PaginationService<R extends PagedExchange> {
         return latestResetAt;
     }
 
+    /** The run stopped before {@code page}: its completed pages beside a fixed transport verdict. */
     private static <R extends PagedExchange> PagedRun<R> stopped(
             List<PagedSearch.Page<R>> pages, int requestedPages, String diagnostic) {
-        return new PagedRun<>(requestedPages, pages, new Outcome.Failure<>(FailureKind.TRANSPORT, diagnostic));
+        return stopped(pages, requestedPages, FailureKind.TRANSPORT, diagnostic, null);
+    }
+
+    /** The run stopped before {@code page}: its completed pages beside the given verdict and snapshot. */
+    private static <R extends PagedExchange> PagedRun<R> stopped(
+            List<PagedSearch.Page<R>> pages,
+            int requestedPages,
+            FailureKind kind,
+            String diagnostic,
+            RateLimitSnapshot rateLimits) {
+        return new PagedRun<>(requestedPages, pages, new Outcome.Failure<>(kind, diagnostic, null, rateLimits, 0));
+    }
+
+    /** Whole seconds rounded up, so a fractional overflow never prints equal to the wait ceiling. */
+    private static long ceilingSeconds(Duration duration) {
+        long seconds = duration.getSeconds();
+        if (duration.getNano() > 0 && seconds < Long.MAX_VALUE) {
+            return seconds + 1;
+        }
+        return seconds;
     }
 }

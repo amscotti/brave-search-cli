@@ -42,7 +42,7 @@ final class VideoSearchCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        VideoSearchComposition process = VideoSearchComposition.process(storedCredentials(), environment);
+        VideoSearchComposition process = VideoSearchComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "videos", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -86,18 +86,8 @@ final class VideoSearchCompositionTest {
             int exitCode = new Main(
                             exchanges,
                             config,
-                            WebSearchComposition.process(storedCredentials(), environment),
-                            ContextComposition.process(storedCredentials(), environment),
-                            NewsSearchComposition.process(storedCredentials(), environment),
-                            videosSearch,
-                            ImageSearchComposition.process(storedCredentials(), environment),
-                            SuggestComposition.process(storedCredentials(), environment),
-                            SpellcheckComposition.process(storedCredentials(), environment),
-                            PlacesComposition.process(storedCredentials(), environment),
-                            PlacesEnrichmentComposition.process(storedCredentials(), environment),
-                            RichComposition.process(storedCredentials(), environment),
-                            AnswersComposition.process(storedCredentials(), exchanges)
-                            )
+                            Compositions.process(environment, exchanges).withVideosSearch(videosSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

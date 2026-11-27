@@ -97,8 +97,9 @@ public final class SecureConfigStore implements ConfigStore {
 
     private static final String TEMP_SUFFIX = ".tmp";
 
-    /** An indexed {@code ls -le} ACL entry line: {@code N: principal allow|deny actions}. */
-    private static final Pattern ACL_ENTRY = Pattern.compile("\\s*\\d+:\\s+(\\S+)\\s+(?:allow|deny)\\b.*");
+    /** An indexed {@code ls -le} ACL entry line: {@code N: principal [inherited] allow|deny actions}. */
+    private static final Pattern ACL_ENTRY =
+            Pattern.compile("\\s*\\d+:\\s+(\\S+)\\s+(?:inherited\\s+)?(?:allow|deny)\\b.*");
 
     private final Supplier<Path> configPath;
 
@@ -418,6 +419,7 @@ public final class SecureConfigStore implements ConfigStore {
                 || !ownedByProcess(tempAttributes)) {
             throw LocalConfigException.insecureFile("the freshly written temporary config file failed its revalidation");
         }
+        requireSingleHardLink(configPath().getParent().resolve(temp));
         PosixFileAttributes destinationNow = noFollowAttributes(stream, entryName());
         if (destinationBefore == null) {
             if (destinationNow != null) {
@@ -429,7 +431,6 @@ public final class SecureConfigStore implements ConfigStore {
             throw LocalConfigException.insecureFile("the config file vanished during the write; refusing to replace");
         }
         requireSecureConfigFile(destinationNow, configPath());
-        requireSingleHardLink(configPath().getParent().resolve(temp));
         if (!Objects.equals(destinationKeyBefore, destinationNow.fileKey())) {
             throw LocalConfigException.insecureFile("the config file changed identity during the write; refusing to replace");
         }
@@ -479,13 +480,29 @@ public final class SecureConfigStore implements ConfigStore {
                     "the filesystem of " + directory + " cannot pin directory operations");
         }
         SecureDirectoryStream<Path> stream = opened.get();
-        PosixFileAttributes pinned = selfView(stream).readAttributes();
-        if (!sameIdentity(expected, pinned)) {
-            throw LocalConfigException.insecureFile(
-                    "the config directory changed identity while it was opened: " + directory);
+        boolean handedOff = false;
+        try {
+            PosixFileAttributes pinned = selfView(stream).readAttributes();
+            if (!sameIdentity(expected, pinned)) {
+                throw LocalConfigException.insecureFile(
+                        "the config directory changed identity while it was opened: " + directory);
+            }
+            requireManagedDirectory(pinned, requireOwnerOnlyMode);
+            handedOff = true;
+            return stream;
+        } finally {
+            if (!handedOff) {
+                closeQuietly(stream);
+            }
         }
-        requireManagedDirectory(pinned, requireOwnerOnlyMode);
-        return stream;
+    }
+
+    private static void closeQuietly(SecureDirectoryStream<Path> stream) {
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // best effort on a refusing path so the failure that triggered the refusal surfaces intact
+        }
     }
 
     private void requireManagedDirectory(PosixFileAttributes attributes, boolean requireOwnerOnlyMode) {

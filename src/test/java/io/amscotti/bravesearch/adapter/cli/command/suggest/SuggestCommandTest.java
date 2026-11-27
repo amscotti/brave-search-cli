@@ -21,9 +21,9 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
-import io.amscotti.bravesearch.application.port.out.SuggestDispatch;
-import io.amscotti.bravesearch.application.port.out.SuggestExchange;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
@@ -72,7 +72,7 @@ final class SuggestCommandTest {
                 "--rich",
                 "three word query");
 
-        SuggestDispatch dispatched = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<SuggestRequest> dispatched = harness.exchange.dispatches.getFirst();
         SuggestRequest request = dispatched.request();
         assertEquals("three word query", request.query());
         assertEquals("ALL", request.country());
@@ -242,13 +242,13 @@ final class SuggestCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements SuggestExchange {
-        final List<SuggestDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<SuggestRequest, SuggestSearchResult> {
+        final List<RemoteDispatch<SuggestRequest>> dispatches = new ArrayList<>();
         Outcome<SuggestSearchResult> outcome = new Outcome.Success<>(
                 new SuggestSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<SuggestSearchResult> dispatch(SuggestDispatch invocation) {
+        public Outcome<SuggestSearchResult> dispatch(RemoteDispatch<SuggestRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

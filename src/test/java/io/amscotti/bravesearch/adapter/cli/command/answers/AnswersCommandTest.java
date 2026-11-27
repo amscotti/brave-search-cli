@@ -22,13 +22,13 @@ import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.RawCodec;
 import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
-import io.amscotti.bravesearch.application.port.out.AnswersDispatch;
-import io.amscotti.bravesearch.application.port.out.AnswersExchange;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamExchange;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamPort;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
@@ -317,6 +317,30 @@ final class AnswersCommandTest {
     }
 
     @Test
+    void aStreamingDispatchReceivesTheRegisteredCancellationContextAndDetachesOnExit() {
+        Harness harness = new Harness();
+        harness.streamingExit = 0;
+        List<CancellationContext> liveContexts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<CancellationContext> registered =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        harness.cancellations = context -> {
+            registered.set(context);
+            liveContexts.add(context);
+            return () -> liveContexts.remove(context);
+        };
+
+        Harness.RunResult result = harness.run("answers", "q");
+
+        assertEquals(0, result.exitCode(), () -> result.describe());
+        assertEquals(1, harness.streams.dispatches.size());
+        assertSame(
+                registered.get(),
+                harness.streams.dispatches.getFirst().cancellation(),
+                "the streaming dispatch carries the command's registered cancellation context");
+        assertTrue(liveContexts.isEmpty(), "the cancellation context detaches once the command exits");
+    }
+
+    @Test
     void rawOutputIsAcceptedForTheSingleBlockingRequest() {
         Harness harness = new Harness();
 
@@ -483,13 +507,13 @@ final class AnswersCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements AnswersExchange {
-        final List<AnswersDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<AnswersRequest, AnswersResult> {
+        final List<RemoteDispatch<AnswersRequest>> dispatches = new ArrayList<>();
         Outcome<AnswersResult> outcome = new Outcome.Success<>(
                 new AnswersResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<AnswersResult> dispatch(AnswersDispatch invocation) {
+        public Outcome<AnswersResult> dispatch(RemoteDispatch<AnswersRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

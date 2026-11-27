@@ -1,6 +1,7 @@
 package io.amscotti.bravesearch.adapter.cli.presentation.web;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.SimpleSearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;

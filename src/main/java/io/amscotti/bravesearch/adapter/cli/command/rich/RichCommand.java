@@ -7,16 +7,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.RichPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.RichDispatch;
-import io.amscotti.bravesearch.application.port.out.RichExchange;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.request.RichRequest;
 import io.amscotti.bravesearch.domain.result.RichResult;
-import java.util.Objects;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
@@ -38,8 +33,6 @@ public final class RichCommand extends RemoteCommandSupport<RichRequest, RichRes
     /** Registration name under the root command. */
     public static final String NAME = "rich";
 
-    private final RichExchange exchange;
-
     @Parameters(
             index = "0",
             arity = "1..1",
@@ -56,7 +49,7 @@ public final class RichCommand extends RemoteCommandSupport<RichRequest, RichRes
             RemoteOptions remoteOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            RichExchange exchange,
+            RemoteExchange<RichRequest, RichResult> exchange,
             RichPresenter presenter,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -66,11 +59,11 @@ public final class RichCommand extends RemoteCommandSupport<RichRequest, RichRes
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -89,15 +82,4 @@ public final class RichCommand extends RemoteCommandSupport<RichRequest, RichRes
         return new RichRequest(callbackKey);
     }
 
-    @Override
-    protected Outcome<RichResult> exchange(RichRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new RichDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 }

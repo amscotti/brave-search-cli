@@ -9,6 +9,10 @@ import io.amscotti.bravesearch.domain.config.Credential;
  * <p>Functional seam so the command depends on no concrete input adapter: the composition root
  * binds it to the config adapter's secret input, and tests bind it to scripted sources. Every
  * failure surfaces as the typed secret-input configuration error without token material.
+ *
+ * <p>The source decides what counts as an acceptable secret: a delivered credential is one the
+ * exchange preflight accepts, so the config adapter's reader refuses a token no HTTP header
+ * value can carry and the store never holds a key every later invocation would reject.
  */
 @FunctionalInterface
 public interface SecretSource {

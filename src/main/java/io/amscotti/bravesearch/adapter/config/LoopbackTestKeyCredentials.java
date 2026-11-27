@@ -1,5 +1,7 @@
 package io.amscotti.bravesearch.adapter.config;
 
+import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
+import io.amscotti.bravesearch.application.exchange.InvalidTokenException;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
@@ -15,8 +17,9 @@ import java.util.function.Function;
  * environment lookup so this class stays the only environment touch beside the stored
  * credential source. A missing variable is the variable's own not-set failure naming
  * exactly what the operator must provide; a present value is validated through the
- * credential contract — a proxy placeholder token passes, because the token is opaque — and
- * an invalid value names the variable without echoing it.
+ * credential contract and the header alphabet of the subscription token — a proxy
+ * placeholder token passes, because the token is opaque — and an invalid value names the
+ * variable without echoing it.
  */
 public final class LoopbackTestKeyCredentials implements CredentialProvider {
 
@@ -37,10 +40,17 @@ public final class LoopbackTestKeyCredentials implements CredentialProvider {
         if (rawValue == null) {
             throw CredentialResolutionException.notSet(TEST_KEY_VARIABLE);
         }
+        Credential credential;
         try {
-            return Credential.of(rawValue.getBytes(StandardCharsets.UTF_8));
+            credential = Credential.of(rawValue.getBytes(StandardCharsets.UTF_8));
         } catch (InvalidCredentialException invalid) {
             throw CredentialResolutionException.invalid(SOURCE_NAME, invalid.reason());
+        }
+        try {
+            BraveApiRequest.requireWireableToken(credential);
+            return credential;
+        } catch (InvalidTokenException unwirable) {
+            throw CredentialResolutionException.invalid(SOURCE_NAME, unwirable.getMessage());
         }
     }
 

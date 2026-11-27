@@ -41,7 +41,7 @@ final class NewsSearchCompositionTest {
             }
             return null;
         };
-        NewsSearchComposition process = NewsSearchComposition.process(storedCredentials(), environment);
+        NewsSearchComposition process = NewsSearchComposition.process(environment);
 
         RunResult result = runMain(process, "news", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -84,9 +84,8 @@ final class NewsSearchCompositionTest {
             int exitCode = new Main(
                             new ExchangeRegistry(),
                             config,
-                            WebSearchComposition.process(storedCredentials()),
-                            ContextComposition.process(storedCredentials()),
-                            newsSearch)
+                            Compositions.process(name -> null, new ExchangeRegistry()).withNewsSearch(newsSearch),
+                            name -> null)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

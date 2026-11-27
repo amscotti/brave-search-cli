@@ -350,7 +350,7 @@ final class WebSearchPresenterImplTest {
                         + "\"upstream_code\":\"unauthorized\",\"details\":null},"
                         + "\"meta\":{\"http_status\":401,\"rate_limits\":[]}}\n",
                 json.stdoutText());
-        assertEquals(List.of("web: upstream exchange failed with status 401"), json.stderr());
+        assertEquals(List.of("web: the Brave API rejected the API key (HTTP 401, code unauthorized); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'"), json.stderr());
 
         Rendered jsonl = render(failure, machine(OutputMode.JSONL, false), FULL_CONTEXT);
         assertEquals(4, jsonl.exit());
@@ -363,12 +363,12 @@ final class WebSearchPresenterImplTest {
         Rendered human = render(failure, human(false), FULL_CONTEXT);
         assertEquals(4, human.exit());
         assertEquals("", human.stdoutText());
-        assertEquals(List.of("web: upstream exchange failed with status 401"), human.stderr());
+        assertEquals(List.of("web: the Brave API rejected the API key (HTTP 401, code unauthorized); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'"), human.stderr());
 
         Rendered raw = render(failure, machine(OutputMode.RAW, false), FULL_CONTEXT);
         assertEquals(4, raw.exit());
         assertArrayEquals(fixture("unauthorized-error.json"), raw.stdout(), "raw failure emits the bounded error body");
-        assertEquals(List.of("web: upstream exchange failed with status 401"), raw.stderr());
+        assertEquals(List.of("web: the Brave API rejected the API key (HTTP 401, code unauthorized); check the key with 'brave-search config show', or store a new one with 'brave-search config set-key'"), raw.stderr());
     }
 
     @Test

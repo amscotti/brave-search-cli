@@ -11,7 +11,7 @@ import io.amscotti.bravesearch.adapter.cli.presentation.AnswersStreamPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
@@ -657,6 +657,43 @@ final class AnswersStreamPresenterImplTest {
     }
 
     @Test
+    void aLatchedUserSignalOutranksAWriteFailureOnTheTerminalMachineRecord() {
+        for (CancellationContext.Cause signal :
+                List.of(CancellationContext.Cause.SIGINT, CancellationContext.Cause.SIGTERM)) {
+            int expectedExit = signal == CancellationContext.Cause.SIGINT ? 130 : 143;
+            for (String writeFailure : List.of("Broken pipe", "No space left on device")) {
+                ScriptedStream jsonlScript = new ScriptedStream(List.of(new AnswerStreamEvent.Text("one")));
+                jsonlScript.latchThenEnd(signal);
+                RecordingWriter jsonlResults = new RecordingWriter();
+                jsonlResults.failFromWriteWith(2, writeFailure);
+                int jsonlExit = render(
+                        jsonlScript,
+                        output(OutputMode.JSONL, false, false),
+                        jsonlResults,
+                        new ByteArrayOutputStream());
+                assertEquals(
+                        expectedExit,
+                        jsonlExit,
+                        () -> "jsonl keeps " + signal + " status even when terminal write hits " + writeFailure);
+
+                ScriptedStream jsonScript = new ScriptedStream(List.of(new AnswerStreamEvent.Text("one")));
+                jsonScript.latchThenEnd(signal);
+                RecordingWriter jsonResults = new RecordingWriter();
+                jsonResults.failFromWriteWith(1, writeFailure);
+                int jsonExit = render(
+                        jsonScript,
+                        output(OutputMode.JSON, false, false),
+                        jsonResults,
+                        new ByteArrayOutputStream());
+                assertEquals(
+                        expectedExit,
+                        jsonExit,
+                        () -> "json keeps " + signal + " status even when terminal write hits " + writeFailure);
+            }
+        }
+    }
+
+    @Test
     void aConsumerDepartingBeforeTheHeadingWriteIsSilentZero() throws Exception {
         ScriptedStream script = new ScriptedStream(List.of(new AnswerStreamEvent.Text("never reached")));
         RecordingWriter results = new RecordingWriter();
@@ -740,7 +777,7 @@ final class AnswersStreamPresenterImplTest {
     }
 
     /** The warnings-channel router the composition injects, opening this command's channel. */
-    private SearchPresenterBase.WarningsRouter warnings() {
+    private WarningsRouter warnings() {
         return (mode, diagnostics, results, quiet) ->
                 new ModeAwareWarnings(mode, "answers", diagnostics, results, jsonl, quiet);
     }

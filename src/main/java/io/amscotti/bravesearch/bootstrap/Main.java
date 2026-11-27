@@ -33,6 +33,9 @@ import io.amscotti.bravesearch.adapter.cli.presentation.TerminalDetector;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.ConfigShowRecordCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
+import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
+import io.amscotti.bravesearch.adapter.config.DebugTrace;
+import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.GoggleFileLoader;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
@@ -40,11 +43,19 @@ import io.amscotti.bravesearch.domain.config.LocalConfigException;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -64,6 +75,11 @@ import sun.misc.Signal;
 @Command(
         name = Main.COMMAND_NAME,
         description = "Brave Search command line client for humans and autonomous agents.",
+        // the footer names the output modes but not their flag: the flag belongs to each remote
+        // command's grammar, and the root help must never look as if it accepted it here
+        footer = "Run 'brave-search <command> --help' for a command's options. Scripts and agents:"
+                + " give each remote command an explicit json or jsonl output mode, and decide on"
+                + " the exit code before reading the document.",
         versionProvider = Main.VersionProvider.class,
         subcommands = {Main.VersionCommand.class})
 public final class Main implements Runnable {
@@ -75,162 +91,89 @@ public final class Main implements Runnable {
 
     private final ConfigComposition config;
 
-    private final WebSearchComposition webSearch;
+    private final Compositions compositions;
 
-    private final ContextComposition contextSearch;
+    /**
+     * The config group's machine codec, built on first use: only an invocation that assembles
+     * the command line pays for it, and the process wiring builds it over the same mapper set
+     * every remote composition encodes through.
+     */
+    private final Supplier<ConfigShowRecordCodec> configShowCodec;
 
-    private final NewsSearchComposition newsSearch;
-
-    private final VideoSearchComposition videosSearch;
-
-    private final ImageSearchComposition imagesSearch;
-
-    private final SuggestComposition suggestSearch;
-
-    private final SpellcheckComposition spellcheckSearch;
-
-    private final PlacesComposition placesSearch;
-
-    private final PlacesEnrichmentComposition placesEnrichment;
-
-    private final RichComposition richCallbacks;
-
-    private final AnswersComposition answersSearch;
+    /** Whether unexpected internal errors also print a trace of frames and exception types. */
+    private final boolean traceInternalErrors;
 
     @Mixin
     GlobalOptions globals;
 
     @Spec CommandSpec spec;
 
+    /** The process composition: every adapter is the process one. */
     public Main() {
         this(new ExchangeRegistry());
     }
 
+    /** The process composition over the given registry, which receives every live exchange. */
     public Main(ExchangeRegistry exchanges) {
         this(exchanges, ConfigComposition.process());
     }
 
+    /** The process wiring of every remote command over the given configuration. */
     public Main(ExchangeRegistry exchanges, ConfigComposition config) {
-        this(exchanges, config, WebSearchComposition.process(config.credentials()));
+        // one mapper set serves the whole process: every composition and the config group
+        this(exchanges, config, new JsonMappers());
     }
 
-    public Main(ExchangeRegistry exchanges, ConfigComposition config, WebSearchComposition webSearch) {
-        this(exchanges, config, webSearch, ContextComposition.process(config.credentials()));
-    }
-
-    public Main(
-            ExchangeRegistry exchanges,
-            ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch) {
-        this(exchanges, config, webSearch, contextSearch, NewsSearchComposition.process(config.credentials()));
-    }
-
-    public Main(
-            ExchangeRegistry exchanges,
-            ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch,
-            NewsSearchComposition newsSearch) {
-        this(exchanges, config, webSearch, contextSearch, newsSearch, VideoSearchComposition.process(config.credentials()));
-    }
-
-    public Main(
-            ExchangeRegistry exchanges,
-            ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch,
-            NewsSearchComposition newsSearch,
-            VideoSearchComposition videosSearch) {
+    private Main(ExchangeRegistry exchanges, ConfigComposition config, JsonMappers mappers) {
         this(
                 exchanges,
                 config,
-                webSearch,
-                contextSearch,
-                newsSearch,
-                videosSearch,
-                ImageSearchComposition.process(config.credentials()));
+                Compositions.process(
+                        EnvironmentCredentialSource.processEnvironmentLookup(),
+                        exchanges,
+                        mappers,
+                        new JsonlCodec(mappers)),
+                () -> new ConfigShowRecordCodec(mappers),
+                DebugTrace.requested(EnvironmentCredentialSource.processEnvironmentLookup()));
     }
 
+    /**
+     * The fully injected composition. The wiring record is always whole — a test replaces the
+     * one composition it exercises through {@link Compositions} — so no partial constructor
+     * chain exists to keep in step with the endpoint inventory.
+     */
+    public Main(ExchangeRegistry exchanges, ConfigComposition config, Compositions compositions) {
+        this(exchanges, config, compositions, EnvironmentCredentialSource.processEnvironmentLookup());
+    }
+
+    /**
+     * The fully injected composition over the given environment lookup, through which the
+     * internal-error trace opt-in is read.
+     */
     public Main(
             ExchangeRegistry exchanges,
             ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch,
-            NewsSearchComposition newsSearch,
-            VideoSearchComposition videosSearch,
-            ImageSearchComposition imagesSearch) {
+            Compositions compositions,
+            Function<String, String> environmentLookup) {
         this(
                 exchanges,
                 config,
-                webSearch,
-                contextSearch,
-                newsSearch,
-                videosSearch,
-                imagesSearch,
-            SuggestComposition.process(config.credentials()),
-            SpellcheckComposition.process(config.credentials()),
-            PlacesComposition.process(config.credentials()),
-            PlacesEnrichmentComposition.process(config.credentials()),
-            RichComposition.process(config.credentials()));
+                compositions,
+                () -> new ConfigShowRecordCodec(new JsonMappers()),
+                DebugTrace.requested(environmentLookup));
     }
 
-    public Main(
+    private Main(
             ExchangeRegistry exchanges,
             ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch,
-            NewsSearchComposition newsSearch,
-            VideoSearchComposition videosSearch,
-            ImageSearchComposition imagesSearch,
-            SuggestComposition suggestSearch,
-            SpellcheckComposition spellcheckSearch,
-            PlacesComposition placesSearch,
-            PlacesEnrichmentComposition placesEnrichment,
-            RichComposition richCallbacks) {
-        this(
-                exchanges,
-                config,
-                webSearch,
-                contextSearch,
-                newsSearch,
-                videosSearch,
-                imagesSearch,
-                suggestSearch,
-                spellcheckSearch,
-                placesSearch,
-                placesEnrichment,
-                richCallbacks,
-                AnswersComposition.process(config.credentials(), exchanges));
-    }
-
-    public Main(
-            ExchangeRegistry exchanges,
-            ConfigComposition config,
-            WebSearchComposition webSearch,
-            ContextComposition contextSearch,
-            NewsSearchComposition newsSearch,
-            VideoSearchComposition videosSearch,
-            ImageSearchComposition imagesSearch,
-            SuggestComposition suggestSearch,
-            SpellcheckComposition spellcheckSearch,
-            PlacesComposition placesSearch,
-            PlacesEnrichmentComposition placesEnrichment,
-            RichComposition richCallbacks,
-            AnswersComposition answersSearch) {
+            Compositions compositions,
+            Supplier<ConfigShowRecordCodec> configShowCodec,
+            boolean traceInternalErrors) {
         this.exchanges = Objects.requireNonNull(exchanges, "exchanges");
         this.config = Objects.requireNonNull(config, "config");
-        this.webSearch = Objects.requireNonNull(webSearch, "webSearch");
-        this.contextSearch = Objects.requireNonNull(contextSearch, "contextSearch");
-        this.newsSearch = Objects.requireNonNull(newsSearch, "newsSearch");
-        this.videosSearch = Objects.requireNonNull(videosSearch, "videosSearch");
-        this.imagesSearch = Objects.requireNonNull(imagesSearch, "imagesSearch");
-        this.suggestSearch = Objects.requireNonNull(suggestSearch, "suggestSearch");
-        this.spellcheckSearch = Objects.requireNonNull(spellcheckSearch, "spellcheckSearch");
-        this.placesSearch = Objects.requireNonNull(placesSearch, "placesSearch");
-        this.placesEnrichment = Objects.requireNonNull(placesEnrichment, "placesEnrichment");
-        this.richCallbacks = Objects.requireNonNull(richCallbacks, "richCallbacks");
-        this.answersSearch = Objects.requireNonNull(answersSearch, "answersSearch");
+        this.compositions = Objects.requireNonNull(compositions, "compositions");
+        this.configShowCodec = memoized(configShowCodec);
+        this.traceInternalErrors = traceInternalErrors;
         // the single color and width decisions of the process: the real console detection
         // combines with --no-color inside the globals, and the exported COLUMNS observation
         // rides the same detector, so presenters never re-derive either
@@ -249,13 +192,7 @@ public final class Main implements Runnable {
         CommandLine commandLine = assemble(
                 StdoutWriters.passthroughBytes(System.out),
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()));
-        // an execution failure inside a command never becomes picocli's stack trace and
-        // software status: this handler owns the redacted line and its exit code. Picocli
-        // converts the handler's verdict into the exit code and never rethrows past it, so
-        // the mappings the guarded entry promises are decided here for a failure that
-        // escapes a running command: a configuration failure keeps the
-        // local-configuration status, everything else the internal one
-        commandLine.setExecutionExceptionHandler((failure, cmd, parse) -> escapedFailureStatus(failure));
+        commandLine.setErr(new PrintWriter(new OutputStreamWriter(System.err, StandardCharsets.UTF_8), true));
         return commandLine.execute(args);
     }
 
@@ -294,9 +231,18 @@ public final class Main implements Runnable {
         commandLine.addSubcommand(RichCommand.NAME, richCommand());
         commandLine.addSubcommand(AnswersCommand.NAME, answersCommand());
         commandLine.addSubcommand(CompletionCommand.NAME, new CommandLine(new CompletionCommand(results)));
-        // subcommands keep their own writers, so the byte-lossless stdout must reach every
-        // registered command, however deeply nested
-        propagateStdout(commandLine, stdout);
+        // every node shares the root's two process-wide wires: the byte-lossless stdout, so
+        // help text reaches every command however deeply nested, and the version provider,
+        // because the version flag is inherited by the whole tree and a node without the
+        // provider would accept the flag and print nothing
+        propagateWiring(commandLine, stdout, new VersionProvider());
+        // an execution failure inside a command never becomes picocli's stack trace and
+        // software status: this handler owns the redacted line and its exit code. Picocli
+        // converts the handler's verdict into the exit code and never rethrows past it, so
+        // the mappings the guarded entry promises are decided here for a failure that
+        // escapes a running command: a configuration failure keeps the
+        // local-configuration status, everything else the internal one
+        commandLine.setExecutionExceptionHandler((failure, cmd, parse) -> escapedFailureStatus(failure, cmd));
         // strict parsing lands after registration so every subcommand's parser is covered
         return StrictOptionParsing.apply(commandLine);
     }
@@ -307,14 +253,13 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                contextSearch.loopbackTestToken(),
-                contextSearch.exchange(),
-                contextSearch.presenter(),
+                compositions.contextSearch().loopbackTestToken(),
+                compositions.contextSearch().exchange(),
+                compositions.contextSearch().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine contextCommandLine = new CommandLine(command);
-        contextCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return contextCommandLine;
     }
 
@@ -325,16 +270,15 @@ public final class Main implements Runnable {
                 new CommonSearchOptions(),
                 new GoggleOptions(new GoggleFileLoader()),
                 config.credentials(),
-                webSearch.loopbackTestToken(),
-                webSearch.exchange(),
-                webSearch.presenter(),
-                webSearch.pagedPresenter(),
-                webSearch.pagination(),
+                compositions.webSearch().loopbackTestToken(),
+                compositions.webSearch().exchange(),
+                compositions.webSearch().presenter(),
+                compositions.webSearch().pagedPresenter(),
+                compositions.webSearch().pagination(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine webCommandLine = new CommandLine(command);
-        webCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return webCommandLine;
     }
 
@@ -345,16 +289,15 @@ public final class Main implements Runnable {
                 new CommonSearchOptions(),
                 new GoggleOptions(new GoggleFileLoader()),
                 config.credentials(),
-                newsSearch.loopbackTestToken(),
-                newsSearch.exchange(),
-                newsSearch.presenter(),
-                newsSearch.pagedPresenter(),
-                newsSearch.pagination(),
+                compositions.newsSearch().loopbackTestToken(),
+                compositions.newsSearch().exchange(),
+                compositions.newsSearch().presenter(),
+                compositions.newsSearch().pagedPresenter(),
+                compositions.newsSearch().pagination(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine newsCommandLine = new CommandLine(command);
-        newsCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return newsCommandLine;
     }
 
@@ -364,16 +307,15 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                videosSearch.loopbackTestToken(),
-                videosSearch.exchange(),
-                videosSearch.presenter(),
-                videosSearch.pagedPresenter(),
-                videosSearch.pagination(),
+                compositions.videosSearch().loopbackTestToken(),
+                compositions.videosSearch().exchange(),
+                compositions.videosSearch().presenter(),
+                compositions.videosSearch().pagedPresenter(),
+                compositions.videosSearch().pagination(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine videosCommandLine = new CommandLine(command);
-        videosCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return videosCommandLine;
     }
 
@@ -383,14 +325,13 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                imagesSearch.loopbackTestToken(),
-                imagesSearch.exchange(),
-                imagesSearch.presenter(),
+                compositions.imagesSearch().loopbackTestToken(),
+                compositions.imagesSearch().exchange(),
+                compositions.imagesSearch().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine imagesCommandLine = new CommandLine(command);
-        imagesCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return imagesCommandLine;
     }
 
@@ -400,14 +341,13 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                suggestSearch.loopbackTestToken(),
-                suggestSearch.exchange(),
-                suggestSearch.presenter(),
+                compositions.suggestSearch().loopbackTestToken(),
+                compositions.suggestSearch().exchange(),
+                compositions.suggestSearch().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine suggestCommandLine = new CommandLine(command);
-        suggestCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return suggestCommandLine;
     }
 
@@ -417,14 +357,13 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                spellcheckSearch.loopbackTestToken(),
-                spellcheckSearch.exchange(),
-                spellcheckSearch.presenter(),
+                compositions.spellcheckSearch().loopbackTestToken(),
+                compositions.spellcheckSearch().exchange(),
+                compositions.spellcheckSearch().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine spellcheckCommandLine = new CommandLine(command);
-        spellcheckCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return spellcheckCommandLine;
     }
 
@@ -435,13 +374,12 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                placesSearch.loopbackTestToken(),
-                placesSearch.exchange(),
-                placesSearch.presenter(),
+                compositions.placesSearch().loopbackTestToken(),
+                compositions.placesSearch().exchange(),
+                compositions.placesSearch().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new));
-        searchCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         group.addSubcommand(PlacesSearchCommand.NAME, searchCommandLine);
         group.addSubcommand(PlacesDetailsCommand.NAME, detailsCommand());
         group.addSubcommand(PlacesDescribeCommand.NAME, describeCommand());
@@ -453,15 +391,14 @@ public final class Main implements Runnable {
                 globals,
                 new RemoteOptions(LocalhostResolver.platform()),
                 config.credentials(),
-                placesEnrichment.loopbackTestToken(),
-                placesEnrichment.exchange(),
-                placesEnrichment.detailsPresenter(),
-                placesEnrichment.pagination(),
+                compositions.placesEnrichment().loopbackTestToken(),
+                compositions.placesEnrichment().exchange(),
+                compositions.placesEnrichment().detailsPresenter(),
+                compositions.placesEnrichment().pagination(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine commandLine = new CommandLine(command);
-        commandLine.getCommandSpec().versionProvider(new VersionProvider());
         return commandLine;
     }
 
@@ -470,15 +407,14 @@ public final class Main implements Runnable {
                 globals,
                 new RemoteOptions(LocalhostResolver.platform()),
                 config.credentials(),
-                placesEnrichment.loopbackTestToken(),
-                placesEnrichment.exchange(),
-                placesEnrichment.describePresenter(),
-                placesEnrichment.pagination(),
+                compositions.placesEnrichment().loopbackTestToken(),
+                compositions.placesEnrichment().exchange(),
+                compositions.placesEnrichment().describePresenter(),
+                compositions.placesEnrichment().pagination(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine commandLine = new CommandLine(command);
-        commandLine.getCommandSpec().versionProvider(new VersionProvider());
         return commandLine;
     }
 
@@ -487,14 +423,13 @@ public final class Main implements Runnable {
                 globals,
                 new RemoteOptions(LocalhostResolver.platform()),
                 config.credentials(),
-                richCallbacks.loopbackTestToken(),
-                richCallbacks.exchange(),
-                richCallbacks.presenter(),
+                compositions.richCallbacks().loopbackTestToken(),
+                compositions.richCallbacks().exchange(),
+                compositions.richCallbacks().presenter(),
                 exchanges,
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine richCommandLine = new CommandLine(command);
-        richCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return richCommandLine;
     }
 
@@ -504,16 +439,15 @@ public final class Main implements Runnable {
                 new RemoteOptions(LocalhostResolver.platform()),
                 new CommonSearchOptions(),
                 config.credentials(),
-                answersSearch.loopbackTestToken(),
-                answersSearch.exchange(),
-                answersSearch.streams(),
+                compositions.answersSearch().loopbackTestToken(),
+                compositions.answersSearch().exchange(),
+                compositions.answersSearch().streams(),
                 exchanges,
-                answersSearch.presenter(),
-                answersSearch.streamingPresenter(),
+                compositions.answersSearch().presenter(),
+                compositions.answersSearch().streamingPresenter(),
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()),
                 WriterDiagnosticsSink::new);
         CommandLine answersCommandLine = new CommandLine(command);
-        answersCommandLine.getCommandSpec().versionProvider(new VersionProvider());
         return answersCommandLine;
     }
 
@@ -531,7 +465,7 @@ public final class Main implements Runnable {
                 new ShowCommand(
                         config.credentials(),
                         config.store(),
-                        new ConfigShowRecordCodec(new JsonMappers()),
+                        configShowCodec.get(),
                         config.configPath(),
                         results,
                         WriterDiagnosticsSink::new));
@@ -541,9 +475,10 @@ public final class Main implements Runnable {
         return group;
     }
 
-    private static void propagateStdout(CommandLine commandLine, PrintWriter stdout) {
+    private static void propagateWiring(CommandLine commandLine, PrintWriter stdout, IVersionProvider versions) {
         commandLine.setOut(stdout);
-        commandLine.getSubcommands().values().forEach(subcommand -> propagateStdout(subcommand, stdout));
+        commandLine.getCommandSpec().versionProvider(versions);
+        commandLine.getSubcommands().values().forEach(subcommand -> propagateWiring(subcommand, stdout, versions));
     }
 
     /**
@@ -551,19 +486,22 @@ public final class Main implements Runnable {
      * SIGTERM handlers are installed before the command line runs so a signal during a run
      * latches its cause on every live exchange while normal control flow still decides the
      * exit code, and the first cause latched wins, so an interrupt followed by a termination
-     * keeps the interrupt's status. A signal that arrives while no exchange is live has no
-     * latch to arm, so its handler terminates the process itself with that signal's
-     * conventional status — the same 130 or 143 a latched run exits by — and no user signal
-     * is ever absorbed. Platforms that reserve a signal for their own shutdown machinery
-     * refuse the registration and still terminate with that signal's conventional status on
-     * their own.
+     * keeps the interrupt's status. A signal arriving while no exchange is live has nothing
+     * to latch, so its handler terminates the process itself with that signal's conventional
+     * status — the same 130 or 143 a latched run exits by — and no user signal is ever
+     * absorbed. A signal repeated while the run it latched is still winding down terminates
+     * the process at once the same way: the user has asked twice. Platforms that reserve a
+     * signal for their own shutdown machinery refuse the registration and still terminate
+     * with that signal's conventional status on their own. {@link UserSignals} owns the
+     * decision of each delivery.
      */
     public static void main(String[] args) {
         ExchangeRegistry exchanges = new ExchangeRegistry();
+        UserSignals signals = new UserSignals(exchanges);
         try {
             Signal.handle(new Signal("INT"), signal -> {
-                if (!exchanges.interruptLiveExchanges()) {
-                    System.exit(ExitCodeMapper.SIGINT);
+                if (signals.interrupt()) {
+                    Runtime.getRuntime().halt(ExitCodeMapper.SIGINT);
                 }
             });
         } catch (IllegalArgumentException reservedByPlatform) {
@@ -571,14 +509,15 @@ public final class Main implements Runnable {
         }
         try {
             Signal.handle(new Signal("TERM"), signal -> {
-                if (!exchanges.terminateLiveExchanges()) {
-                    System.exit(ExitCodeMapper.SIGTERM);
+                if (signals.terminate()) {
+                    Runtime.getRuntime().halt(ExitCodeMapper.SIGTERM);
                 }
             });
         } catch (IllegalArgumentException reservedByPlatform) {
             // the platform's own termination handling decides the status without our latch
         }
-        System.exit(runGuarded(() -> new Main(exchanges), args));
+        System.exit(runGuarded(
+                () -> new Main(exchanges), EnvironmentCredentialSource.processEnvironmentLookup(), args));
     }
 
     /**
@@ -589,15 +528,29 @@ public final class Main implements Runnable {
      * machine's own default status. A configuration failure ends as the documented
      * local-configuration status with one redacted diagnostic line. Failures inside a
      * running command are converted by the execution handler installed in {@link
-     * #execute(String...)}; both share the same mappings.
+     * #assemble(PrintWriter, ResultWriter)}; both share the same mappings.
      */
     static int runGuarded(Supplier<Main> composition, String... args) {
+        return runGuarded(composition, EnvironmentCredentialSource.processEnvironmentLookup(), args);
+    }
+
+    /**
+     * The guarded process entry over an injected environment lookup, so the internal-error
+     * trace opt-in is honored even when construction fails before the command line exists.
+     */
+    static int runGuarded(
+            Supplier<Main> composition, Function<String, String> environmentLookup, String... args) {
+        Objects.requireNonNull(composition, "composition");
+        Objects.requireNonNull(environmentLookup, "environmentLookup");
+        Main built = null;
         try {
-            return composition.get().runRoot(args);
+            built = composition.get();
+            return built.runRoot(args);
         } catch (LocalConfigException | CredentialResolutionException misconfigured) {
-            return localConfigurationStatus(misconfigured);
+            return localConfigurationStatus(misconfigured, null);
         } catch (Throwable internal) {
-            return internalFailureStatus(internal);
+            boolean trace = built != null ? built.traceInternalErrors : DebugTrace.requested(environmentLookup);
+            return reportInternalFailure(internal, trace, null);
         }
     }
 
@@ -607,18 +560,54 @@ public final class Main implements Runnable {
      * #runGuarded(Supplier, String...)}.
      */
     public int runGuarded(String... args) {
-        return runGuarded(() -> this, args);
+        return runGuarded(() -> this, name -> null, args);
     }
 
     /**
      * The internal-status form of one unexpected failure: a single redacted stderr line
-     * carrying nothing but the exception's own simple name — no stack trace, no internal
-     * class names, no message text that could quote user input or credential material.
+     * carrying nothing but the exception's own simple name — no message text that could quote
+     * user input or credential material. A process that opted in through
+     * {@link DebugTrace#VARIABLE} additionally receives a trace of frames and exception types.
      */
-    private static int internalFailureStatus(Throwable failure) {
+    private static int reportInternalFailure(Throwable failure, boolean trace, CommandLine cmd) {
         Throwable reported = reported(failure);
-        System.err.println(COMMAND_NAME + ": unexpected internal error (" + reported.getClass().getSimpleName() + ")");
+        PrintWriter err = errorWriter(cmd);
+        err.println(COMMAND_NAME + ": unexpected internal error (" + exceptionTypeName(reported) + ")");
+        if (trace) {
+            printTrace(err, reported);
+        }
+        err.flush();
         return ExitCodeMapper.forKind(FailureKind.INTERNAL);
+    }
+
+    /**
+     * The opt-in trace of an internal failure: the frames of the failure, of every cause in
+     * its chain, and of every suppressed exception, with the exception types named — and
+     * nothing else. No message appears anywhere in it, because a message can quote user input
+     * or credential material; the frames already say where the failure happened, which is what
+     * a bug report needs.
+     */
+    private static void printTrace(PrintWriter err, Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        printChain(err, "debug trace, exception messages withheld", failure, seen);
+    }
+
+    private static void printChain(PrintWriter err, String openingLabel, Throwable root, Set<Throwable> seen) {
+        String label = openingLabel;
+        for (Throwable current = root; current != null; current = current.getCause()) {
+            if (!seen.add(current)) {
+                err.println(COMMAND_NAME + ": " + label + " (circular reference): " + exceptionTypeName(current));
+                return;
+            }
+            err.println(COMMAND_NAME + ": " + label + ": " + exceptionTypeName(current));
+            for (StackTraceElement frame : current.getStackTrace()) {
+                err.println("    at " + frame);
+            }
+            for (Throwable suppressed : current.getSuppressed()) {
+                printChain(err, "suppressed", suppressed, seen);
+            }
+            label = "caused by";
+        }
     }
 
     /**
@@ -628,15 +617,15 @@ public final class Main implements Runnable {
      * configuration failure keeps the local-configuration status with its redacted message,
      * everything else ends as the internal status.
      */
-    private static int escapedFailureStatus(Throwable failure) {
+    private int escapedFailureStatus(Throwable failure, CommandLine cmd) {
         Throwable reported = reported(failure);
         if (reported instanceof LocalConfigException misconfigured) {
-            return localConfigurationStatus(misconfigured);
+            return localConfigurationStatus(misconfigured, cmd);
         }
         if (reported instanceof CredentialResolutionException unresolved) {
-            return localConfigurationStatus(unresolved);
+            return localConfigurationStatus(unresolved, cmd);
         }
-        return internalFailureStatus(failure);
+        return reportInternalFailure(reported, traceInternalErrors, cmd);
     }
 
     /**
@@ -644,9 +633,44 @@ public final class Main implements Runnable {
      * redacted message as the single stderr line and the documented configuration exit
      * code.
      */
-    private static int localConfigurationStatus(Exception misconfigured) {
-        System.err.println(COMMAND_NAME + ": " + misconfigured.getMessage());
+    private static int localConfigurationStatus(Exception misconfigured, CommandLine cmd) {
+        PrintWriter err = errorWriter(cmd);
+        err.println(commandPrefix(cmd) + ": " + misconfigured.getMessage());
+        err.flush();
         return ExitCodeMapper.forKind(FailureKind.LOCAL_CONFIG);
+    }
+
+    private static PrintWriter errorWriter(CommandLine cmd) {
+        return cmd != null
+                ? cmd.getErr()
+                : new PrintWriter(new OutputStreamWriter(System.err, StandardCharsets.UTF_8), true);
+    }
+
+    /** Dotted subcommand path below the root (e.g. {@code context} or {@code places.details}), or the root name. */
+    private static String commandPrefix(CommandLine cmd) {
+        if (cmd == null || cmd.getParent() == null) {
+            return COMMAND_NAME;
+        }
+        Deque<String> segments = new ArrayDeque<>();
+        for (CommandLine node = cmd; node.getParent() != null; node = node.getParent()) {
+            segments.addFirst(node.getCommandName());
+        }
+        return String.join(".", segments);
+    }
+
+    /**
+     * The simple name of the throwable's concrete class, or of its nearest named superclass
+     * when it is an anonymous subclass whose own simple name is empty — never a package-qualified
+     * class name.
+     */
+    private static String exceptionTypeName(Throwable failure) {
+        for (Class<?> type = failure.getClass(); type != null; type = type.getSuperclass()) {
+            String simple = type.getSimpleName();
+            if (!simple.isEmpty()) {
+                return simple;
+            }
+        }
+        return Throwable.class.getSimpleName();
     }
 
     /** The failure to report: picocli wraps a command's own failure; the cause is the failure itself. */
@@ -685,6 +709,25 @@ public final class Main implements Runnable {
             }
             return 0;
         }
+    }
+
+    /** A supplier that resolves once and answers the resolved value on every later call. */
+    private static <T> Supplier<T> memoized(Supplier<T> resolution) {
+        return new Supplier<>() {
+
+            private T resolved;
+
+            private boolean resolvedYet;
+
+            @Override
+            public T get() {
+                if (!resolvedYet) {
+                    resolved = resolution.get();
+                    resolvedYet = true;
+                }
+                return resolved;
+            }
+        };
     }
 
     /**

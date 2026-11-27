@@ -27,9 +27,10 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
 import com.tngtech.archunit.library.dependencies.SliceRule;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpWebSearchGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
 import io.amscotti.bravesearch.adapter.cli.command.CliCrossAdapterFixture;
 import io.amscotti.bravesearch.adapter.configlookalike.ViolatesConfigSiblingPrefix;
+import io.amscotti.bravesearch.adapter.selfwired.SelfChainingAdapter;
 import io.amscotti.bravesearch.adapterimpostor.PrefixSiblingType;
 import io.amscotti.bravesearch.adapterimpostor.WiresPrefixSiblingType;
 import io.amscotti.bravesearch.api.ApiSurfaceFixture;
@@ -338,7 +339,7 @@ final class ArchitectureTest {
         assertProductionClean(RULE_3A_ADAPTER_DEPENDENCIES);
 
         assertRuleBitesFixture(
-                RULE_3B_NO_SIBLING_ADAPTERS, "CliCrossAdapterFixture", CliCrossAdapterFixture.class, BraveHttpWebSearchGateway.class);
+                RULE_3B_NO_SIBLING_ADAPTERS, "CliCrossAdapterFixture", CliCrossAdapterFixture.class, BraveHttpTransport.class);
         assertRuleBitesInUnion(RULE_3B_NO_SIBLING_ADAPTERS, "CliCrossAdapterFixture");
         assertProductionClean(RULE_3B_NO_SIBLING_ADAPTERS);
     }
@@ -372,6 +373,22 @@ final class ArchitectureTest {
                 siblingWiring.hasViolation(),
                 () -> "a package that merely extends the adapter prefix's spelling is not an adapter:\n"
                         + siblingWiring.getFailureReport());
+
+        JavaClasses selfWired =
+                new ClassFileImporter().importClasses(SelfChainingAdapter.class, SelfChainingAdapter.Builder.class);
+        EvaluationResult selfConstruction = RULE_4_COMPOSITION_ROOTS.evaluate(selfWired);
+        assertFalse(
+                selfConstruction.hasViolation(),
+                () -> "constructor chaining and nested-builder construction are a type's own implementation, not"
+                        + " composition from outside:\n"
+                        + selfConstruction.getFailureReport());
+
+        List<String> selfReferences = adapterConstructorReferencesOutsideCompositionRoots(selfWired);
+        assertTrue(
+                selfReferences.isEmpty(),
+                () -> "a self-referential constructor reference is a type's own implementation, not composition from"
+                        + " outside:\n"
+                        + selfReferences);
     }
 
     @Test
@@ -686,8 +703,20 @@ final class ArchitectureTest {
 
     private static DescribedPredicate<JavaCall<?>> constructorCallToConcreteAdapter() {
         return DescribedPredicate.describe(
-                "instantiate a concrete adapter class",
-                call -> "<init>".equals(call.getName()) && isConcreteAdapter(call.getTargetOwner()));
+                "instantiate a concrete adapter class from outside its own type",
+                call -> "<init>".equals(call.getName())
+                        && isConcreteAdapter(call.getTargetOwner())
+                        && !sameTopLevelType(call.getOriginOwner(), call.getTargetOwner()));
+    }
+
+    /**
+     * Constructor chaining, and a nested class constructing its owner, are a type's own
+     * implementation rather than composition from outside, so a call whose origin and target
+     * share one top-level type is exempt — the same attribution the class-cycle companion
+     * gives a nested type's dependencies.
+     */
+    private static boolean sameTopLevelType(JavaClass origin, JavaClass target) {
+        return topLevelOwnerOf(origin.getName()).equals(topLevelOwnerOf(target.getName()));
     }
 
     private static boolean isConcreteAdapter(JavaClass candidate) {
@@ -698,7 +727,7 @@ final class ArchitectureTest {
 
     /**
      * Companion to {@link #RULE_4_COMPOSITION_ROOTS}: ArchUnit's call-based rule cannot see
-     * constructor references such as {@code BraveHttpWebSearchGateway::new}, because those compile
+     * constructor references such as {@code BraveHttpTransport::new}, because those compile
      * to constant-pool method handles rather than invokespecial calls. This check walks the
      * recorded constructor references of every class outside the composition roots and reports each
      * one whose target is a concrete adapter.
@@ -710,7 +739,8 @@ final class ArchitectureTest {
                 continue;
             }
             for (JavaConstructorReference reference : javaClass.getConstructorReferencesFromSelf()) {
-                if (isConcreteAdapter(reference.getTarget().getOwner())) {
+                if (isConcreteAdapter(reference.getTarget().getOwner())
+                        && !sameTopLevelType(javaClass, reference.getTarget().getOwner())) {
                     violations.add(javaClass.getName() + " references the constructor of concrete adapter "
                             + reference.getTarget().getOwner().getName());
                 }

@@ -7,9 +7,9 @@ import io.amscotti.bravesearch.adapter.cli.presentation.HeadingStyle;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriteFailure;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
-import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenterBase;
 import io.amscotti.bravesearch.adapter.cli.presentation.SgrStyle;
 import io.amscotti.bravesearch.adapter.cli.presentation.TerminalSafeText;
+import io.amscotti.bravesearch.adapter.cli.presentation.WarningsRouter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.ErrorCodes;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
@@ -94,7 +94,7 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
     private final JsonlCodec jsonl;
     private final JsonMappers mappers;
     private final long maxAccumulatedBytes;
-    private final SearchPresenterBase.WarningsRouter warnings;
+    private final WarningsRouter warnings;
 
     /**
      * @param envelopes the success and failure envelope codec of JSON mode
@@ -108,7 +108,7 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
             JsonlCodec jsonl,
             JsonMappers mappers,
             long maxAccumulatedBytes,
-            SearchPresenterBase.WarningsRouter warnings) {
+            WarningsRouter warnings) {
         this.envelopes = Objects.requireNonNull(envelopes, "envelopes");
         this.jsonl = Objects.requireNonNull(jsonl, "jsonl");
         this.mappers = Objects.requireNonNull(mappers, "mappers");
@@ -498,7 +498,9 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
                         results,
                         diagnostics);
                 if (written >= 0) {
-                    return written;
+                    // a user signal that already won the latch outranks a downstream broken
+                    // pipe or write failure during the terminal render
+                    return signalled ? exit : written;
                 }
             }
             case JSON -> {
@@ -525,7 +527,7 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
                         results,
                         diagnostics);
                 if (written >= 0) {
-                    return written;
+                    return signalled ? exit : written;
                 }
             }
             case HUMAN, RAW -> diagnostics.emit(

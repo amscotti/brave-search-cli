@@ -45,5 +45,18 @@ public sealed interface Outcome<T> {
         public Failure(FailureKind kind, String diagnostic, UpstreamError upstream, RateLimitSnapshot rateLimits) {
             this(kind, diagnostic, upstream, rateLimits, 0);
         }
+
+        /**
+         * This failure as the failure of another success type: a failure stores none of the
+         * success type's values, so the view is the same instance under whichever outcome a
+         * layer boundary needs — transport result, endpoint result, public response — and no
+         * boundary copies the members to cross.
+         *
+         * @param <Success> the success type of the outcome the failure is read under
+         */
+        @SuppressWarnings("unchecked")
+        public <Success> Failure<Success> widen() {
+            return (Failure<Success>) this;
+        }
     }
 }

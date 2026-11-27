@@ -33,9 +33,19 @@ import java.util.UUID;
  */
 public final class ConfigScenarios {
 
-    /** Inherited variables scrubbed from every child so ambient credentials cannot interfere. */
+    /** Inherited variables scrubbed from every child so ambient credentials, proxy, or debug settings cannot interfere. */
     private static final Set<String> SCRUBBED =
-            Set.of("BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY", "BRAVE_SEARCH_TEST_KEY", "XDG_CONFIG_HOME", "JAVA_OPTS");
+            Set.of(
+                    "BRAVE_API_KEY",
+                    "BRAVE_SEARCH_API_KEY",
+                    "BRAVE_SEARCH_TEST_KEY",
+                    "BRAVE_SEARCH_DEBUG",
+                    "HTTPS_PROXY",
+                    "https_proxy",
+                    "NO_PROXY",
+                    "no_proxy",
+                    "XDG_CONFIG_HOME",
+                    "JAVA_OPTS");
 
     private static final ProcessHarness HARNESS = new ProcessHarness();
 

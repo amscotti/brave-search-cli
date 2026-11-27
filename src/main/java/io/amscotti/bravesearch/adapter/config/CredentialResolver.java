@@ -1,5 +1,7 @@
 package io.amscotti.bravesearch.adapter.config;
 
+import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
+import io.amscotti.bravesearch.application.exchange.InvalidTokenException;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
@@ -14,7 +16,8 @@ import java.util.function.Supplier;
  * Applies the credential precedence: the canonical environment variable, then its compatibility
  * alias, then the config file, then the missing-credential failure.
  *
- * <p>A source that is present but invalid ends resolution immediately: falling through to a
+ * <p>A source that is present but invalid ends resolution immediately — including a token whose
+ * characters cannot travel in the subscription-token HTTP header value: falling through to a
  * lower source would silently mask the operator's explicit-but-broken setting, so the failure
  * names that source and the search stops. Provenance travels as a source name plus the boolean
  * alias-shadowed flag — never a value — so the presentation layer can render the verbose
@@ -64,7 +67,7 @@ public final class CredentialResolver implements CredentialProvider {
         }
         Optional<Credential> fromFile = fileCredential();
         if (fromFile.isPresent()) {
-            return new ResolvedCredential(fromFile.orElseThrow(), FILE_SOURCE, false);
+            return new ResolvedCredential(wireable(FILE_SOURCE, fromFile.orElseThrow()), FILE_SOURCE, false);
         }
         throw CredentialResolutionException.missing(SEARCHED_SOURCES);
     }
@@ -78,10 +81,21 @@ public final class CredentialResolver implements CredentialProvider {
     }
 
     private static Credential accepted(String sourceName, String rawValue) throws CredentialResolutionException {
+        Credential credential;
         try {
-            return Credential.of(rawValue.getBytes(StandardCharsets.UTF_8));
+            credential = Credential.of(rawValue.getBytes(StandardCharsets.UTF_8));
         } catch (InvalidCredentialException invalid) {
             throw CredentialResolutionException.invalid(sourceName, invalid.reason());
+        }
+        return wireable(sourceName, credential);
+    }
+
+    private static Credential wireable(String sourceName, Credential credential) throws CredentialResolutionException {
+        try {
+            BraveApiRequest.requireWireableToken(credential);
+            return credential;
+        } catch (InvalidTokenException unwirable) {
+            throw CredentialResolutionException.invalid(sourceName, unwirable.getMessage());
         }
     }
 }

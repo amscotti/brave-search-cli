@@ -9,17 +9,12 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.VideoPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.VideoSearchPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.VideoSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.VideoSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.request.VideoSearchRequest;
 import io.amscotti.bravesearch.domain.result.VideoSearchResult;
-import java.util.Objects;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -49,8 +44,6 @@ public final class VideoSearchCommand extends PagedRemoteCommandSupport<VideoSea
     /** Registration name under the root command. */
     public static final String NAME = "videos";
 
-    private final VideoSearchExchange exchange;
-
     @Parameters(
             index = "0",
             arity = "1..1",
@@ -75,7 +68,7 @@ public final class VideoSearchCommand extends PagedRemoteCommandSupport<VideoSea
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            VideoSearchExchange exchange,
+            RemoteExchange<VideoSearchRequest, VideoSearchResult> exchange,
             VideoSearchPresenter presenter,
             VideoPagedSearchPresenter pagedPresenter,
             PaginationService<VideoSearchResult> pagination,
@@ -88,13 +81,13 @@ public final class VideoSearchCommand extends PagedRemoteCommandSupport<VideoSea
                 commonOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 pagedPresenter,
                 pagination,
                 cancellations,
                 results,
                 diagnosticsFactory);
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -130,17 +123,6 @@ public final class VideoSearchCommand extends PagedRemoteCommandSupport<VideoSea
                 "--spellcheck");
     }
 
-    @Override
-    protected Outcome<VideoSearchResult> exchange(VideoSearchRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new VideoSearchDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 
     @Override
     protected VideoSearchRequest requestOf() {

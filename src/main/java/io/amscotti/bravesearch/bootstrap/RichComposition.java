@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpRichGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.RichEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.RichPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.rich.RichPresenterImpl;
 import io.amscotti.bravesearch.adapter.cli.presentation.rich.RichProjectionExtractor;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.RichExchange;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.RichRequest;
+import io.amscotti.bravesearch.domain.result.RichResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -34,7 +32,7 @@ import java.util.function.Function;
  * callback lookup — no pagination, no streaming — so one invocation is exactly one GET
  * exchange.
  */
-public record RichComposition(CredentialProvider loopbackTestToken, RichExchange exchange, RichPresenter presenter) {
+public record RichComposition(CredentialProvider loopbackTestToken, RemoteExchange<RichRequest, RichResult> exchange, RichPresenter presenter) {
 
     public RichComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -43,31 +41,22 @@ public record RichComposition(CredentialProvider loopbackTestToken, RichExchange
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static RichComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static RichComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
-    static RichComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        RichExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpRichGateway gateway = new BraveHttpRichGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.rich(invocation.request());
-            }
-        };
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static RichComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static RichComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<RichRequest, RichResult> exchange =
+                RemoteExchanges.blocking(RichEndpoint::assemble, RichResult::new, environmentLookup);
         return new RichComposition(loopbackTestToken, exchange, presenter(mappers, jsonl));
     }
 

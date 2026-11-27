@@ -601,7 +601,13 @@ public final class PlacesEnrichmentScenarios extends SearchScenarios {
                         session.exitValue(),
                         () -> "the latched interrupt owns the status, stderr=<" + new String(session.stderr(), UTF_8) + ">");
                 assertEquals("", new String(drainAfterExit(session), UTF_8), "a buffered mode emits no partial payload");
-                List<String> diagnostics = new String(session.stderr(), UTF_8).lines().toList();
+                List<String> diagnostics = new String(session.stderr(), UTF_8)
+                        .lines()
+                        // the human mode announces a pacing wait before performing it; that
+                        // line is progress, and the failure after it is still exactly one
+                        // diagnostic — whichever side of the announcement the signal lands on
+                        .filter(line -> !line.contains(" for the rate-limit window to reset before "))
+                        .toList();
                 assertEquals(1, diagnostics.size(), () -> "exactly one diagnostic line: " + diagnostics);
                 assertTrue(
                         diagnostics.getFirst().matches(
@@ -634,7 +640,7 @@ public final class PlacesEnrichmentScenarios extends SearchScenarios {
                 .header("X-RateLimit-Limit", "1")
                 .header("X-RateLimit-Policy", "request")
                 .header("X-RateLimit-Remaining", "0")
-                .header("X-RateLimit-Reset", "3600")
+                .header("X-RateLimit-Reset", "30")
                 .writeBytes(detailsBody("poi-1"))
                 .start();
     }

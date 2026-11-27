@@ -42,7 +42,7 @@ final class PlacesEnrichmentCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        PlacesEnrichmentComposition process = PlacesEnrichmentComposition.process(storedCredentials(), environment);
+        PlacesEnrichmentComposition process = PlacesEnrichmentComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "places", "details", "--base-url", "http://127.0.0.1:1", "a1b2c3d4");
 
@@ -86,18 +86,8 @@ final class PlacesEnrichmentCompositionTest {
             int exitCode = new Main(
                             exchanges,
                             config,
-                            WebSearchComposition.process(storedCredentials(), environment),
-                            ContextComposition.process(storedCredentials(), environment),
-                            NewsSearchComposition.process(storedCredentials(), environment),
-                            VideoSearchComposition.process(storedCredentials(), environment),
-                            ImageSearchComposition.process(storedCredentials(), environment),
-                            SuggestComposition.process(storedCredentials(), environment),
-                            SpellcheckComposition.process(storedCredentials(), environment),
-                            PlacesComposition.process(storedCredentials(), environment),
-                            placesEnrichment,
-                            RichComposition.process(storedCredentials(), environment),
-                            AnswersComposition.process(storedCredentials(), exchanges)
-                            )
+                            Compositions.process(environment, exchanges).withPlacesEnrichment(placesEnrichment),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

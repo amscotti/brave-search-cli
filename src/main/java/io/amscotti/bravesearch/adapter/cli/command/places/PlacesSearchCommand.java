@@ -12,12 +12,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlacesSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.PlaceSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.PlaceSearchExchange;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.request.GeoLoc;
@@ -64,8 +60,6 @@ public final class PlacesSearchCommand extends RemoteCommandSupport<PlaceSearchR
 
     /** Registration name under the places group. */
     public static final String NAME = "search";
-
-    private final PlaceSearchExchange exchange;
 
     @Mixin
     CommonSearchOptions commonOptions;
@@ -127,7 +121,7 @@ public final class PlacesSearchCommand extends RemoteCommandSupport<PlaceSearchR
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            PlaceSearchExchange exchange,
+            RemoteExchange<PlaceSearchRequest, PlaceSearchResult> exchange,
             PlacesSearchPresenter presenter,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -137,12 +131,12 @@ public final class PlacesSearchCommand extends RemoteCommandSupport<PlaceSearchR
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -194,15 +188,4 @@ public final class PlacesSearchCommand extends RemoteCommandSupport<PlaceSearchR
         return builder.build();
     }
 
-    @Override
-    protected Outcome<PlaceSearchResult> exchange(PlaceSearchRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new PlaceSearchDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 }

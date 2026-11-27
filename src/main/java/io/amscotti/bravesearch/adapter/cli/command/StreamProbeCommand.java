@@ -1,5 +1,6 @@
 package io.amscotti.bravesearch.adapter.cli.command;
 
+import io.amscotti.bravesearch.adapter.cli.exit.ExitCodeMapper;
 import io.amscotti.bravesearch.adapter.cli.option.SimpleDurationConverter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.application.port.out.StreamProbePort;
@@ -112,7 +113,7 @@ public final class StreamProbeCommand implements Callable<Integer> {
             // messages embed addresses and URIs, so none of that text may travel
             if (cancellation.latch(CancellationContext.Cause.TRANSPORT_FAILURE)) {
                 diagnostics.emit(NAME + ": cannot open stream: the streaming connection failed to open");
-                return CancellationContext.Cause.TRANSPORT_FAILURE.exitCode();
+                return ExitCodeMapper.forCause(CancellationContext.Cause.TRANSPORT_FAILURE);
             }
             return exitCodeFor(cancellation, diagnostics);
         } finally {
@@ -165,14 +166,15 @@ public final class StreamProbeCommand implements Callable<Integer> {
         return exitCodeFor(cancellation, diagnostics);
     }
 
-    /** The exit status is the terminal cause's own code; only failure causes explain themselves. */
+    /** The exit status is the exit table's verdict for the terminal cause; only failure causes explain themselves. */
     private int exitCodeFor(CancellationContext cancellation, DiagnosticsSink diagnostics) {
         CancellationContext.Cause cause = cancellation.cause().orElse(CancellationContext.Cause.CLOSED);
+        int exit = ExitCodeMapper.forCause(cause);
         return switch (cause) {
-            case SIGINT, SIGTERM, BROKEN_PIPE, CLOSED -> cause.exitCode();
+            case SIGINT, SIGTERM, BROKEN_PIPE, CLOSED -> exit;
             case IDLE_TIMEOUT, WALL_TIMEOUT, SUBSCRIBER_FAILURE, TRANSPORT_FAILURE -> {
                 diagnostics.emit(NAME + ": stream aborted: " + cause);
-                yield cause.exitCode();
+                yield exit;
             }
         };
     }

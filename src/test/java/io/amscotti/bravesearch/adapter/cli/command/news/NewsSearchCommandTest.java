@@ -27,8 +27,8 @@ import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.exchange.LocalhostResolver;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
-import io.amscotti.bravesearch.application.port.out.NewsSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.NewsSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
@@ -108,7 +108,7 @@ final class NewsSearchCommandTest {
                 "https://example.com/goggle",
                 "three word query");
 
-        NewsSearchDispatch dispatched = harness.exchange.dispatches.getFirst();
+        RemoteDispatch<NewsSearchRequest> dispatched = harness.exchange.dispatches.getFirst();
         NewsSearchRequest request = dispatched.request();
         assertEquals("three word query", request.query());
         assertEquals("ALL", request.country());
@@ -378,13 +378,13 @@ final class NewsSearchCommandTest {
         }
     }
 
-    private static final class RecordingExchange implements NewsSearchExchange {
-        final List<NewsSearchDispatch> dispatches = new ArrayList<>();
+    private static final class RecordingExchange implements RemoteExchange<NewsSearchRequest, NewsSearchResult> {
+        final List<RemoteDispatch<NewsSearchRequest>> dispatches = new ArrayList<>();
         Outcome<NewsSearchResult> outcome = new Outcome.Success<>(
                 new NewsSearchResult(200, new UpstreamPayload("{}".getBytes(UTF_8)), null, null, null, null));
 
         @Override
-        public Outcome<NewsSearchResult> dispatch(NewsSearchDispatch invocation) {
+        public Outcome<NewsSearchResult> dispatch(RemoteDispatch<NewsSearchRequest> invocation) {
             dispatches.add(invocation);
             return outcome;
         }

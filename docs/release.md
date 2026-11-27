@@ -60,16 +60,18 @@ and its scope is asserted by test.
 The Gradle-level proof of the release surface runs as part of `check` on every host with a
 supported release triple (macOS and Linux; the archive is cut for the host that builds it,
 so a host without a triple — the pinned toolchains include windows-x64 — fails the
-packaging itself, and its `test`/`check` fail with it because the verification below is
-wired into `test`):
+packaging itself when `releaseArchiveTest` or `check` runs, while the plain `test` task
+never touches the release chain):
 
 - `releaseArchive` packages the archive (native binary, docs, completions, skill, machine
   schemas, published JARs, SBOM);
 - `releaseSbom` places the SBOM beside the archive;
 - `sha256Sums` writes `SHA256SUMS` over the release directory;
-- `io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest` (the unit test suite;
-  the build wires the packaged archive and release directory into `test` through system
-  properties after `sha256Sums`) unpacks the real archive with the platform `tar`, asserts
+- `io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest` (run by the
+  `releaseArchiveTest` task, which `check` runs; the build wires the packaged archive and
+  release directory into it through system properties after `sha256Sums`, while the plain
+  `test` task excludes this class and never needs the release artifacts) unpacks the real
+  archive with the platform `tar`, asserts
   the naming form, the single top-level directory, the executable bit of `bin/brave-search`,
   a clean `--version` run whose printed version matches the archive name, full `SHA256SUMS`
   coverage with matching digests, the runtime-only SBOM scope, the packaged machine
@@ -250,6 +252,16 @@ configure no Gradle caching: every run resolves and verifies dependencies from a
 cache, so a stale cache can never mask dependency drift or a broken artifact source.
 The heavy hosted builds and the nested sample-consumer build cap Gradle workers at two.
 Linux JVM test jobs install Zsh for the completion-script syntax checks.
+
+Resolving from a clean cache means a rate-limited repository reaches Gradle itself. Gradle
+retries a transient failure — an HTTP 429 or 5xx, a dropped connection — with a doubling
+pause, but its default budget of three attempts within three seconds is shorter than a
+rate-limit window lasts, and an exhausted budget surfaces as a plugin or artifact that "was
+not found". `gradle.properties` raises that budget to eight attempts from two seconds, about
+four minutes of trying, and keeps the span bounded so a resolution that cannot succeed still
+fails within minutes. Both settings name Gradle-internal properties, so
+`io.amscotti.bravesearch.release.RepositoryRetryBudgetTest` also checks that the running
+distribution still reads the names they are declared under.
 
 The hygiene job also executes the release resolver against offline GitHub API fixtures,
 covering valid annotated tags, commit identity, maintainer accounts, signatures, and failed

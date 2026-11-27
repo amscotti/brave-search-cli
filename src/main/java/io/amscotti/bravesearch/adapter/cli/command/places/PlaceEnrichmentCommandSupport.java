@@ -9,13 +9,12 @@ import io.amscotti.bravesearch.adapter.cli.presentation.PlaceEnrichmentPresenter
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.SearchPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentDispatch;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteWalk;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
@@ -51,14 +50,12 @@ abstract class PlaceEnrichmentCommandSupport
         extends RemoteCommandSupport<PlaceEnrichmentRequest, PlaceEnrichmentResult> {
 
     private final PlaceEnrichmentPresenter presenter;
-    private final PlaceEnrichmentExchange exchange;
     private final PaginationService<PlaceEnrichmentResult> pagination;
-    private final CancellationRegistry cancellations;
 
     /**
      * @param presenter the renderer of the command's walk outcomes, including the
      *     per-chunk JSONL recorder
-     * @param exchange the chunk exchange seam, called with ascending chunk numbers
+     * @param exchange the outbound port; its walk form dispatches the chunk requests
      * @param pagination the sequential walk orchestrator, wired with the always-continue
      *     probe — the chunk budget is the walk's sole terminator — and the cancellable
      *     pacing waiter
@@ -71,7 +68,7 @@ abstract class PlaceEnrichmentCommandSupport
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
             PlaceEnrichmentPresenter presenter,
-            PlaceEnrichmentExchange exchange,
+            RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> exchange,
             PaginationService<PlaceEnrichmentResult> pagination,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -81,14 +78,13 @@ abstract class PlaceEnrichmentCommandSupport
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 unreachableSingleRequestPresenter(),
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.presenter = Objects.requireNonNull(presenter, "presenter");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
         this.pagination = Objects.requireNonNull(pagination, "pagination");
-        this.cancellations = Objects.requireNonNull(cancellations, "cancellations");
     }
 
     /** The endpoint this command travels to. */
@@ -123,24 +119,21 @@ abstract class PlaceEnrichmentCommandSupport
             ResultWriter results,
             DiagnosticsSink diagnostics) {
         CancellationContext cancellation = new CancellationContext();
-        Runnable detach = cancellations.register(cancellation);
+        Runnable detach = cancellations().register(cancellation);
         try {
             PaginationService.PagedRun<PlaceEnrichmentResult> run;
-            try {
+            try (RemoteWalk<PlaceEnrichmentRequest, PlaceEnrichmentResult> walk =
+                    exchange().openWalk(dispatchOf(request, credential, cancellation))) {
                 run = pagination.fetchAll(
-                        chunk -> exchange(chunkOf(request, chunk), credential, cancellation),
+                        chunk -> walk.dispatch(chunkOf(request, chunk)),
                         request.chunkCount(),
                         cancellation,
-                        presenter.chunkObserver(request, output, results, diagnostics));
+                        presenter.chunkObserver(request, output, results, diagnostics),
+                        announcePacingWaits("request", commandName(), output, diagnostics));
             } catch (UncheckedIOException writeFailure) {
                 return WalkExitPolicy.exitForWalkWriteFailure(writeFailure, cancellation, diagnostics, commandName());
             }
-            int presented;
-            try {
-                presented = presenter.present(run, request, output, results, diagnostics);
-            } catch (UncheckedIOException writeFailure) {
-                return WalkExitPolicy.exitForWalkWriteFailure(writeFailure, cancellation, diagnostics, commandName());
-            }
+            int presented = presenter.present(run, request, output, results, diagnostics);
             Optional<Integer> signalExit = WalkExitPolicy.latchedSignalExit(run, cancellation);
             if (signalExit.isPresent()) {
                 // the latch is authoritative: the mode rendered its transport-failure document
@@ -169,16 +162,4 @@ abstract class PlaceEnrichmentCommandSupport
         return new PlaceEnrichmentRequest(request.kind(), request.idsOfChunk(chunk));
     }
 
-    @Override
-    protected final Outcome<PlaceEnrichmentResult> exchange(
-            PlaceEnrichmentRequest chunk, Credential credential, CancellationContext cancellation) {
-        return exchange.dispatch(new PlaceEnrichmentDispatch(
-                chunk,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 }

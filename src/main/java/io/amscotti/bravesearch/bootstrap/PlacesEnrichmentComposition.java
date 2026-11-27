@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpPlaceEnrichmentGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.PlaceEnrichmentEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDescribePresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDetailsPresenter;
@@ -15,11 +13,11 @@ import io.amscotti.bravesearch.adapter.cli.presentation.places.PlaceDetailsExtra
 import io.amscotti.bravesearch.adapter.cli.presentation.places.PlaceDetailsPresenterImpl;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.service.SlicedRateWaiter;
+import io.amscotti.bravesearch.domain.request.PlaceEnrichmentRequest;
 import io.amscotti.bravesearch.domain.result.PlaceEnrichmentResult;
 import java.time.Clock;
 import java.util.Objects;
@@ -33,11 +31,10 @@ import java.util.function.Function;
  * injectable so the root command line runs hermetically in tests; the process factory
  * binds the real environment lookup and transport adapters.
  *
- * <p>Each chunk dispatch is a self-contained lifecycle: the invocation's
- * already-resolved credential is handed to a fresh single-exchange gateway, whose
- * transport and HTTP client close with the gateway after the exchange, so one walk
- * never leaves an open client behind and never resolves its credential twice. The walk
- * requests its chunks strictly sequentially.
+ * <p>A sequential chunk walk opens one shared transport and HTTP client across every chunk
+ * through {@link RemoteExchange#openWalk} and closes it when the walk finishes, so one walk
+ * keeps its connection to the peer, never leaves an open client behind, and never resolves its
+ * credential twice. The walk requests its chunks strictly sequentially.
  *
  * <p>The fan-out walk's continuation rule: the enrichment endpoints document no
  * continuation field, so the orchestrator is wired with the always-continue probe —
@@ -45,7 +42,7 @@ import java.util.function.Function;
  */
 public record PlacesEnrichmentComposition(
         CredentialProvider loopbackTestToken,
-        PlaceEnrichmentExchange exchange,
+        RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> exchange,
         PaginationService<PlaceEnrichmentResult> pagination,
         PlaceDetailsPresenter detailsPresenter,
         PlaceDescribePresenter describePresenter) {
@@ -59,33 +56,24 @@ public record PlacesEnrichmentComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static PlacesEnrichmentComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static PlacesEnrichmentComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
-    static PlacesEnrichmentComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static PlacesEnrichmentComposition process(Function<String, String> environmentLookup) {
+        JsonMappers mappers = new JsonMappers();
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static PlacesEnrichmentComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        PlaceEnrichmentExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpPlaceEnrichmentGateway gateway = new BraveHttpPlaceEnrichmentGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.fetch(invocation.request());
-            }
-        };
+        RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> exchange =
+                RemoteExchanges.blocking(PlaceEnrichmentEndpoint::assemble, PlaceEnrichmentResult::new, environmentLookup);
         PaginationService<PlaceEnrichmentResult> pagination =
                 new PaginationService<>(PaginationService.ContinuationProbe.alwaysContinue(), new SlicedRateWaiter(Clock.systemUTC()));
-        JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
         return new PlacesEnrichmentComposition(
                 loopbackTestToken, exchange, pagination, detailsPresenter(mappers, jsonl), describePresenter(mappers, jsonl));
     }

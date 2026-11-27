@@ -42,7 +42,7 @@ final class SpellcheckCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        SpellcheckComposition process = SpellcheckComposition.process(storedCredentials(), environment);
+        SpellcheckComposition process = SpellcheckComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "spellcheck", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -86,18 +86,8 @@ final class SpellcheckCompositionTest {
             int exitCode = new Main(
                             exchanges,
                             config,
-                            WebSearchComposition.process(storedCredentials(), environment),
-                            ContextComposition.process(storedCredentials(), environment),
-                            NewsSearchComposition.process(storedCredentials(), environment),
-                            VideoSearchComposition.process(storedCredentials(), environment),
-                            ImageSearchComposition.process(storedCredentials(), environment),
-                            SuggestComposition.process(storedCredentials(), environment),
-                            spellcheckSearch,
-                            PlacesComposition.process(storedCredentials(), environment),
-                            PlacesEnrichmentComposition.process(storedCredentials(), environment),
-                            RichComposition.process(storedCredentials(), environment),
-                            AnswersComposition.process(storedCredentials(), exchanges)
-                            )
+                            Compositions.process(environment, exchanges).withSpellcheckSearch(spellcheckSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

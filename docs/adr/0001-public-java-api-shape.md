@@ -156,7 +156,7 @@ The library surface shipped, and this record now describes the as-built shape (s
   outcome rather than a broken tree.
 - The public streaming surface settled as decided: `AnswersStreamHandle` exposes the
   memoized `Flow.Publisher<PublicStreamFrame>` and a public `StreamCancellation`
-  (`cancel()`/`cancelled()`), while `AnswersExchange`, the internal publishers, and
+  (`cancel()`/`cancelled()`), while `AnswersStreamExchange`, the internal publishers, and
   `CancellationContext` stay internal. `PublicStreamFrame` is sealed over `Text`,
   `Tagged`, and `UnknownTag` records whose payload text is the exact tag payload, never a
   re-encoded JSON view — passthrough framing noise is not projected at all. The `Tagged`
@@ -166,8 +166,9 @@ The library surface shipped, and this record now describes the as-built shape (s
   past the two exported boundary types.
 - The public builder requires an explicit `tokenSupplier`, never applies environment or
   config precedence, and offers the documented budgets, a caller-owned executor option,
-  and a loopback-only `baseUrl` override whose origin routing can never move credentials
-  off the production origin. `close()` cancels live streams, closes the shared transport,
+  and a loopback-only `baseUrl` override where the caller's own token supplier feeds both
+  the production origin and the override alike (the caller controls what its supplier
+  returns). `close()` cancels live streams, closes the shared transport,
   shuts the owned executor down, and leaves caller-supplied executors alone.
 - The exported-types allowlist moved to `docs/java-api.md` as its normative home; the
   architecture rule and that list change together by construction.
@@ -177,11 +178,25 @@ The library surface shipped, and this record now describes the as-built shape (s
   `AnswersStreamExchange` and the `CancellationContext` latch the handle wrapped in the
   exported allowlist and in the public signature. The composition now reduces each opened
   exchange to plain functions over domain and JDK types (`api.internal.OpenedAnswersStream`)
-  and the public constructor takes
-  `Function<AnswersRequest, Outcome<AnswersStreamHandle>>`; the client tracks returned
+  and the composition constructor takes
+  `Function<AnswersRequest, Outcome<AnswersStreamHandle>>`; that constructor is
+  package-private, because one parameter per endpoint would break on every added endpoint
+  as a public signature, so the builder is the only composition entry; the client tracks returned
   handles by identity, handles detach from their client when the stream terminates
   naturally (completion or failure releases the client's reference; consumers still close
   every handle), and the allowlist is exactly the two Jackson boundary types. Tagged
   frames' parsed payload tree is empty when the payload is not exactly one JSON document
   (parse-or-empty), and `AnswersStreamException.kind()` exposes the stable failure
   category of a stream failure.
+- One gateway serves every blocking endpoint. Decision 1's "no shared gateway hierarchy" was
+  read for a while as one gateway class per endpoint, which turned out to be the same class
+  ten times over, identical apart from type names. The per-endpoint ports stayed — they are
+  what keeps endpoint types stable and what the library composition binds — but their one
+  implementation is the endpoint-generic `BraveHttpBlockingGateway`, which takes the
+  endpoint's own request assembly and result projection as functions, so a fix to the
+  shared exchange behavior lands for every endpoint at once. The CLI side uses the same
+  genericity for its invocation shape (`RemoteDispatch`) and exchange (`RemoteExchange`).
+- The compatibility contract is narrower than "all of `domain..`". Part of the domain layer
+  is CLI vocabulary — output channels and configuration views — that never reaches a public
+  signature. The public API's reach is computed and pinned by `PublicApiSurfaceTest`, and
+  the facade's composition constructor is package-private, so neither grows by accident.

@@ -139,6 +139,11 @@ public final class WebScenarios extends SearchScenarios {
         authenticationFailureExitsFourInHumanAndJsonModes(webCommand, "web", SANDBOX_PREFIX);
     }
 
+    /** A key the origin rejects with an auth-bearing 422 is an authentication failure, never a generic upstream error. */
+    public static void aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes(List<String> webCommand) throws Exception {
+        aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes(webCommand, "web", SANDBOX_PREFIX);
+    }
+
     /** A 429 ends the jsonl stream in one error record carrying the observed rate-limit windows. */
     public static void rateLimitedJsonlErrorCarriesTheObservedWindows(List<String> webCommand) throws Exception {
         rateLimitedJsonlErrorCarriesTheObservedWindows(webCommand, SANDBOX_PREFIX);

@@ -50,12 +50,13 @@ import tools.jackson.databind.JsonNode;
  * caller-supplied executor is never shut down by close. Use after close reports the
  * closed-client transport failure, never an exception.
  *
- * <p>Composition: {@link #builder()} is the supported entry; its {@link Builder#build()}
+ * <p>Composition: {@link #builder()} is the one entry; its {@link Builder#build()}
  * delegates to {@code api.internal.Assembler}, which instantiates the concrete adapters so
- * this package never imports one. The public constructor below exists for that composition
- * and for callers wiring their own endpoints; every collaborator is a plain function over
- * public, domain, or JDK types — the streaming collaborator returns public
- * {@link AnswersStreamHandle handles} — so no internal type appears in any signature.
+ * this package never imports one. The composition constructor is package-private on purpose:
+ * one parameter per endpoint, it would break on every added endpoint if it were public, so it
+ * stays an implementation detail behind the builder. Every collaborator is a plain function
+ * over public, domain, or JDK types — the streaming collaborator returns public
+ * {@link AnswersStreamHandle handles} — so no internal type appears in any public signature.
  */
 public final class BraveSearchClient implements AutoCloseable {
 
@@ -105,7 +106,7 @@ public final class BraveSearchClient implements AutoCloseable {
      * @throws NullPointerException when any exchange, the reader, or the resource list is
      *     null
      */
-    public BraveSearchClient(
+    BraveSearchClient(
             Function<WebSearchRequest, Outcome<WebSearchResult>> webSearch,
             Function<ContextRequest, Outcome<ContextResult>> llmContext,
             Function<NewsSearchRequest, Outcome<NewsSearchResult>> newsSearch,
@@ -248,8 +249,7 @@ public final class BraveSearchClient implements AutoCloseable {
         }
         return switch (answersStream.apply(request)) {
             case Outcome.Success<AnswersStreamHandle> opened -> registerWhileOpen(opened.value());
-            case Outcome.Failure<AnswersStreamHandle> failure -> new Outcome.Failure<>(
-                    failure.kind(), failure.diagnostic(), failure.upstream(), failure.rateLimits(), failure.httpStatus());
+            case Outcome.Failure<AnswersStreamHandle> failure -> failure.widen();
         };
     }
 
@@ -286,8 +286,8 @@ public final class BraveSearchClient implements AutoCloseable {
     /**
      * Cancels every live Answers stream and releases each owned resource exactly once, most
      * recently owned first; idempotent. A stream or resource whose release throws never
-     * strands the others: every remaining release still runs and the first failure
-     * propagates.
+     * strands the others: every remaining release still runs, the first failure propagates,
+     * and every later one is attached to it as a suppressed exception.
      */
     @Override
     public void close() {
@@ -304,16 +304,16 @@ public final class BraveSearchClient implements AutoCloseable {
             try {
                 handle.close();
             } catch (RuntimeException runtime) {
-                failure = failure == null ? runtime : failure;
+                failure = firstOrSuppressed(failure, runtime);
             }
         }
         for (int index = ownedResources.size() - 1; index >= 0; index--) {
             try {
                 ownedResources.get(index).close();
             } catch (RuntimeException runtime) {
-                failure = failure == null ? runtime : failure;
+                failure = firstOrSuppressed(failure, runtime);
             } catch (Exception checked) {
-                failure = failure == null ? new IllegalStateException("closing an owned resource failed", checked) : failure;
+                failure = firstOrSuppressed(failure, new IllegalStateException("closing an owned resource failed", checked));
             }
         }
         if (failure != null) {
@@ -321,11 +321,35 @@ public final class BraveSearchClient implements AutoCloseable {
         }
     }
 
+    /**
+     * The first failure of a release sequence, carrying every later one as a suppressed
+     * exception — the convention of try-with-resources — so a caller chasing a leak sees every
+     * release that refused, never only the one the release order met first.
+     */
+    private static RuntimeException firstOrSuppressed(RuntimeException first, RuntimeException later) {
+        if (first == null) {
+            return later;
+        }
+        if (first != later) {
+            first.addSuppressed(later);
+        }
+        return first;
+    }
+
     private <Response> Outcome<Response> whileOpen(Supplier<Outcome<Response>> call) {
         if (closed.get()) {
             return new Outcome.Failure<>(FailureKind.TRANSPORT, "the client is closed");
         }
-        return call.get();
+        Outcome<Response> outcome = call.get();
+        if (closed.get()
+                && outcome instanceof Outcome.Failure<Response> failure
+                && failure.kind() == FailureKind.INTERNAL
+                && "the HTTP client has been closed".equals(failure.diagnostic())) {
+            // close() raced between the open check above and transport dispatch: surface the
+            // documented closed-client transport outcome rather than the transport's internal code
+            return new Outcome.Failure<>(FailureKind.TRANSPORT, "the client is closed");
+        }
+        return outcome;
     }
 
     private static void requireKind(PlaceEnrichmentRequest request, PlaceEnrichmentRequest.Kind kind, String method) {
@@ -485,8 +509,7 @@ public final class BraveSearchClient implements AutoCloseable {
             return switch (opened) {
                 case Outcome.Success<OpenedAnswersStream> success ->
                     new Outcome.Success<>(new ApiAnswersStreamHandle(success.value(), tagPayloadReader));
-                case Outcome.Failure<OpenedAnswersStream> failure -> new Outcome.Failure<>(
-                        failure.kind(), failure.diagnostic(), failure.upstream(), failure.rateLimits(), failure.httpStatus());
+                case Outcome.Failure<OpenedAnswersStream> failure -> failure.widen();
             };
         }
     }

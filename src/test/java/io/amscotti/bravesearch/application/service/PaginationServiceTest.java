@@ -267,6 +267,176 @@ final class PaginationServiceTest {
     }
 
     @Test
+    void aWaitBeyondTheMaximumPacingWaitEndsTheWalkAsRateLimitedWithoutWaiting() {
+        // an exhausted monthly window: the reset lies weeks away, and a walk must say so
+        // instead of sleeping until then
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot monthExhausted = snapshotOf(
+                observedAt, new RateLimitWindow("month", 2000, 0, Duration.ofDays(30)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", monthExhausted)));
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ZERO, Duration.ofDays(29));
+
+        PaginationService.PagedRun<WebSearchResult> run = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, waiter, Duration.ofMinutes(1))
+                .fetchAll(fetcher, 3, neverCancelled(), ignored -> {});
+
+        assertFalse(run.succeeded());
+        assertEquals(FailureKind.RATE_LIMITED, run.failure().kind(), "a refused wait is a rate-limit verdict");
+        assertEquals(0, run.failure().httpStatus(), "a local pacing refusal carries no upstream failing status");
+        assertSame(
+                monthExhausted,
+                run.failure().rateLimits(),
+                "the triggering rate-limit snapshot rides the refused wait failure");
+        assertTrue(
+                run.failure().diagnostic().contains("2505600s"),
+                "the diagnostic names the outstanding wait in seconds: " + run.failure().diagnostic());
+        assertEquals(1, run.receivedPages(), "the pages completed before the refused wait are preserved");
+        assertTrue(waiter.resetDeadlines.isEmpty(), "none of the over-long wait is performed");
+        assertEquals(List.of(1), fetcher.requestedPages(), "no request follows a refused wait");
+    }
+
+    @Test
+    void aFractionalOverflowBeyondTheMaximumWaitRoundsUpInsteadOfPrintingEqualSeconds() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted =
+                snapshotOf(observedAt, new RateLimitWindow("minute", 60, 0, Duration.ofSeconds(61)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(
+                1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ZERO, Duration.ofMillis(60_500));
+
+        PaginationService.PagedRun<WebSearchResult> run = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, waiter, Duration.ofSeconds(60))
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {});
+
+        assertFalse(run.succeeded());
+        assertEquals(FailureKind.RATE_LIMITED, run.failure().kind());
+        assertEquals(
+                "the rate-limit window resets in 61s, beyond this walk's maximum wait of 60s; retry after the reset",
+                run.failure().diagnostic());
+
+        RecordingWaiter subSecondWaiter = new RecordingWaiter(Duration.ZERO, Duration.ofMillis(500));
+        PaginationService.PagedRun<WebSearchResult> zeroCapRun = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, subSecondWaiter, Duration.ZERO)
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {});
+
+        assertEquals(
+                "the rate-limit window resets in 1s, beyond this walk's maximum wait of 0s; retry after the reset",
+                zeroCapRun.failure().diagnostic());
+    }
+
+    @Test
+    void aSubMillisecondOutstandingWaitIsNeverAnnouncedAsZeroSeconds() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted =
+                snapshotOf(observedAt, new RateLimitWindow("request", 1, 0, Duration.ofSeconds(1)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(
+                1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        fetcher.respond(2, successWithBody("{\"query\":{\"more_results_available\":false}}"));
+        List<String> heard = new ArrayList<>();
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ZERO, Duration.ofNanos(500_000));
+
+        PaginationService.PagedRun<WebSearchResult> run =
+                new PaginationService<WebSearchResult>(PaginationServiceTest::webContinuation, waiter)
+                        .fetchAll(
+                                fetcher,
+                                2,
+                                neverCancelled(),
+                                ignored -> {},
+                                (page, outstanding) -> heard.add(page + ":" + outstanding));
+
+        assertTrue(run.succeeded());
+        assertTrue(heard.isEmpty(), "sub-millisecond remainders must not announce a zero-second wait: " + heard);
+    }
+
+    @Test
+    void aWaitAtExactlyTheMaximumPacingWaitIsStillPerformed() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted = snapshotOf(
+                observedAt, new RateLimitWindow("request", 1, 0, Duration.ofSeconds(60)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        fetcher.respond(2, successWithBody("{\"query\":{\"more_results_available\":false}}"));
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ofSeconds(60), Duration.ofSeconds(60));
+
+        PaginationService.PagedRun<WebSearchResult> run = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, waiter, Duration.ofSeconds(60))
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {});
+
+        assertTrue(run.succeeded());
+        assertEquals(1, waiter.resetDeadlines.size(), "the boundary wait belongs to the allowed side");
+    }
+
+    @Test
+    void thePacingListenerHearsEveryWaitBeforeItHappens() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted = snapshotOf(
+                observedAt, new RateLimitWindow("request", 1, 0, Duration.ofSeconds(2)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        fetcher.respond(2, successWithBody("{\"query\":{\"more_results_available\":false}}"));
+        List<String> events = new ArrayList<>();
+        List<String> heard = new ArrayList<>();
+        PaginationService.RateWaiter waiter = new PaginationService.RateWaiter() {
+
+            @Override
+            public Duration outstandingUntil(Instant resetAt) {
+                return Duration.ofMillis(1500);
+            }
+
+            @Override
+            public Duration await(Instant resetAt, CancellationContext cancellation) {
+                events.add("wait");
+                return Duration.ofSeconds(2);
+            }
+        };
+
+        new PaginationService<WebSearchResult>(PaginationServiceTest::webContinuation, waiter)
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {}, (page, outstanding) -> {
+                    heard.add(page + ":" + outstanding);
+                    events.add("listener");
+                });
+
+        assertEquals(List.of("2:PT1.5S"), heard, "the wait before page 2 is announced with its outstanding time");
+        assertEquals(List.of("listener", "wait"), events, "the announcement precedes the wait it announces");
+    }
+
+    @Test
+    void aWaitWithNothingOutstandingIsStillPerformedButNeverAnnounced() {
+        // a reset the previous page's body read already outlived: the waiter is still asked,
+        // because it alone knows what the reset still owes, but there is no wait to announce
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted = snapshotOf(
+                observedAt, new RateLimitWindow("request", 1, 0, Duration.ofSeconds(1)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        fetcher.respond(2, successWithBody("{\"query\":{\"more_results_available\":false}}"));
+        List<String> heard = new ArrayList<>();
+        RecordingWaiter waiter = new RecordingWaiter();
+
+        PaginationService.PagedRun<WebSearchResult> run =
+                new PaginationService<WebSearchResult>(PaginationServiceTest::webContinuation, waiter)
+                        .fetchAll(fetcher, 2, neverCancelled(), ignored -> {}, (page, outstanding) -> heard.add(page + ":" + outstanding));
+
+        assertTrue(run.succeeded());
+        assertEquals(1, waiter.resetDeadlines.size(), "the waiter is still consulted");
+        assertTrue(heard.isEmpty(), "nothing is announced when there is no wait to announce: " + heard);
+    }
+
+    @Test
+    void aNegativeMaximumPacingWaitIsRejectedAndNoBoundAtAllIsAllowed() {
+        PaginationService.RateWaiter neverWaits = (resetAt, cancellation) -> Duration.ZERO;
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, neverWaits, Duration.ofSeconds(-1)));
+        new PaginationService<WebSearchResult>(PaginationServiceTest::webContinuation, neverWaits, Duration.ZERO);
+    }
+
+    @Test
     void noWindowExhaustedMeansNoWaitAtAll() {
         RecordingFetcher fetcher = new RecordingFetcher();
         fetcher.respond(
@@ -513,6 +683,7 @@ final class PaginationServiceTest {
     private static final class RecordingWaiter implements PaginationService.RateWaiter {
 
         private final Duration waitPerformed;
+        private final Duration outstanding;
         private final List<Instant> resetDeadlines = new ArrayList<>();
 
         RecordingWaiter() {
@@ -520,7 +691,17 @@ final class PaginationServiceTest {
         }
 
         RecordingWaiter(Duration waitPerformed) {
+            this(waitPerformed, Duration.ZERO);
+        }
+
+        RecordingWaiter(Duration waitPerformed, Duration outstanding) {
             this.waitPerformed = waitPerformed;
+            this.outstanding = outstanding;
+        }
+
+        @Override
+        public Duration outstandingUntil(Instant resetAt) {
+            return outstanding;
         }
 
         @Override

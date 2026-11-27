@@ -5,7 +5,7 @@ import io.amscotti.bravesearch.adapter.cli.option.RemoteOptions;
 import io.amscotti.bravesearch.adapter.cli.presentation.PlaceDescribePresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.PlaceEnrichmentExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.domain.request.PlaceEnrichmentRequest;
@@ -49,7 +49,7 @@ public final class PlacesDescribeCommand extends PlaceEnrichmentCommandSupport {
             RemoteOptions remoteOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            PlaceEnrichmentExchange exchange,
+            RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> exchange,
             PlaceDescribePresenter presenter,
             PaginationService<PlaceEnrichmentResult> pagination,
             CancellationRegistry cancellations,

@@ -1,8 +1,6 @@
 package io.amscotti.bravesearch.bootstrap;
 
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpClientFactory;
-import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
-import io.amscotti.bravesearch.adapter.bravehttp.endpoint.BraveHttpSuggestGateway;
+import io.amscotti.bravesearch.adapter.bravehttp.endpoint.SuggestEndpoint;
 import io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarnings;
 import io.amscotti.bravesearch.adapter.cli.presentation.SuggestPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.EnvelopeCodec;
@@ -13,10 +11,10 @@ import io.amscotti.bravesearch.adapter.cli.presentation.suggest.SuggestPresenter
 import io.amscotti.bravesearch.adapter.cli.presentation.suggest.SuggestProjectionExtractor;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.LoopbackTestKeyCredentials;
-import io.amscotti.bravesearch.application.exchange.ResponseLimits;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.SuggestExchange;
-import java.time.Clock;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
+import io.amscotti.bravesearch.domain.request.SuggestRequest;
+import io.amscotti.bravesearch.domain.result.SuggestSearchResult;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -35,7 +33,7 @@ import java.util.function.Function;
  * one invocation is exactly one GET exchange.
  */
 public record SuggestComposition(
-        CredentialProvider loopbackTestToken, SuggestExchange exchange, SuggestPresenter presenter) {
+        CredentialProvider loopbackTestToken, RemoteExchange<SuggestRequest, SuggestSearchResult> exchange, SuggestPresenter presenter) {
 
     public SuggestComposition {
         Objects.requireNonNull(loopbackTestToken, "loopbackTestToken");
@@ -44,31 +42,22 @@ public record SuggestComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static SuggestComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static SuggestComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
-    /** The shared wiring behind the process factory, with the environment lookup injected. */
-    static SuggestComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
-        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
-        SuggestExchange exchange = invocation -> {
-            BraveHttpTransport transport = new BraveHttpTransport(
-                    new BraveHttpClientFactory(invocation.connectTimeout()).newClient(),
-                    invocation.totalTimeout(),
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    invocation.cancellation());
-            try (BraveHttpSuggestGateway gateway = new BraveHttpSuggestGateway(
-                    transport,
-                    invocation.origin(),
-                    invocation.credential(),
-                    invocation.totalTimeout(),
-                    invocation.pinnedApiVersion())) {
-                return gateway.suggest(invocation.request());
-            }
-        };
+    /** The shared wiring with machine codecs of its own, for a composition built standalone. */
+    static SuggestComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        JsonlCodec jsonl = new JsonlCodec(mappers);
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
+    }
+
+    /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
+    static SuggestComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+        CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
+        RemoteExchange<SuggestRequest, SuggestSearchResult> exchange =
+                RemoteExchanges.blocking(SuggestEndpoint::assemble, SuggestSearchResult::new, environmentLookup);
         return new SuggestComposition(loopbackTestToken, exchange, presenter(mappers, jsonl));
     }
 

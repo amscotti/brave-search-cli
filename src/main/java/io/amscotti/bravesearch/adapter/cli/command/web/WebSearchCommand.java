@@ -13,13 +13,9 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebPagedSearchPresenter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WebSearchPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.WebSearchDispatch;
-import io.amscotti.bravesearch.application.port.out.WebSearchExchange;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.service.PaginationService;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.OutputRequest;
 import io.amscotti.bravesearch.domain.request.Units;
@@ -53,8 +49,6 @@ public final class WebSearchCommand extends PagedRemoteCommandSupport<WebSearchR
 
     /** Registration name under the root command. */
     public static final String NAME = "web";
-
-    private final WebSearchExchange exchange;
 
     /** The web-only goggle input options; web is one of the endpoints that document Goggles. */
     @Mixin
@@ -140,7 +134,7 @@ public final class WebSearchCommand extends PagedRemoteCommandSupport<WebSearchR
             GoggleOptions goggleOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            WebSearchExchange exchange,
+            RemoteExchange<WebSearchRequest, WebSearchResult> exchange,
             WebSearchPresenter presenter,
             WebPagedSearchPresenter pagedPresenter,
             PaginationService<WebSearchResult> pagination,
@@ -153,13 +147,13 @@ public final class WebSearchCommand extends PagedRemoteCommandSupport<WebSearchR
                 commonOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 pagedPresenter,
                 pagination,
                 cancellations,
                 results,
                 diagnosticsFactory);
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
         this.goggleOptions = Objects.requireNonNull(goggleOptions, "goggleOptions");
     }
 
@@ -201,17 +195,6 @@ public final class WebSearchCommand extends PagedRemoteCommandSupport<WebSearchR
                 "--spellcheck");
     }
 
-    @Override
-    protected Outcome<WebSearchResult> exchange(WebSearchRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new WebSearchDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 
     @Override
     protected WebSearchRequest requestOf() {

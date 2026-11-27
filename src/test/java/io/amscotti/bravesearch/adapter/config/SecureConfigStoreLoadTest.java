@@ -11,10 +11,16 @@ import io.amscotti.bravesearch.domain.config.ConfigState;
 import io.amscotti.bravesearch.domain.config.InvalidCredentialException;
 import io.amscotti.bravesearch.domain.config.LocalConfigException;
 import java.io.IOException;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileAttribute;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -110,7 +116,7 @@ final class SecureConfigStoreLoadTest {
     }
 
     @Test
-    void peekSummaryRefusesLikeALoadWhenTheFileIsUnreadable() throws IOException {
+    void peekSummaryRefusesLikeALoadWhenTheFileIsNotOwnerOnly() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
         ConfigStoreHarness.chmod(configPath, "rw-r-----");
@@ -171,12 +177,122 @@ final class SecureConfigStoreLoadTest {
     }
 
     @Test
-    void loadRefusesAFileOwnedByAnotherUser() throws IOException {
+    void loadRefusesAManagedDirectoryOwnedByAnotherUser() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
         LocalConfigException failure = assertThrows(
                 LocalConfigException.class, () -> ConfigStoreHarness.storeExpectingForeignOwner(configPath).load());
         assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("the config directory is not owned by the current user"),
+                () -> "the refusal is the directory's own: " + failure.getMessage());
+    }
+
+    @Test
+    void loadRefusesAConfigFileOwnedByAnotherUserEvenInsideAWellOwnedDirectory() throws IOException {
+        // the state a set-key run as another account leaves behind once the owner repairs the
+        // directory but not the file: the directory passes, and the file must still be refused
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        SecureConfigStore store = ConfigStoreHarness.storeSeeingAConfigFileOwnedByAnotherUser(configPath);
+
+        LocalConfigException refusal = assertThrows(LocalConfigException.class, store::load);
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, refusal.reason());
+        assertTrue(
+                refusal.getMessage().contains("the config file is not owned by the current user"),
+                () -> "the refusal is the file's own: " + refusal.getMessage());
+        LocalConfigException sight = assertThrows(LocalConfigException.class, store::peekSummary);
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, sight.reason(), "a sight refuses like a load");
+    }
+
+    @Test
+    void aManagedDirectoryWithoutAConfigFileReadsAsNeverConfigured() throws IOException {
+        // the directory survived a restore or a manual deletion; the file did not
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Files.delete(configPath);
+
+        ConfigState state = ConfigStoreHarness.store(configPath).load();
+
+        assertEquals(Optional.empty(), state.credential(), "nothing is stored, so nothing is loaded");
+        assertEquals(false, state.summary().present());
+        assertEquals(ConfigFileSight.ABSENT, ConfigStoreHarness.store(configPath).peekSummary());
+    }
+
+    @Test
+    void loadFailsClosedOnAFilesystemThatCannotPinDirectoryOperations() throws IOException {
+        // never a silent downgrade to path-based checks, and never an absent state either
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        SecureConfigStore unpinnable = ConfigStoreHarness.storeOnAnUnpinnableFilesystem(configPath);
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, unpinnable::load);
+
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("cannot pin directory operations"),
+                () -> failure.getMessage());
+        LocalConfigException sight = assertThrows(LocalConfigException.class, unpinnable::peekSummary);
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, sight.reason(), "a sight fails like a load");
+    }
+
+    @Test
+    void loadRefusesAManagedDirectorySwappedForAnotherWhileItWasBeingOpened() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        AtomicBoolean streamClosed = new AtomicBoolean();
+        SecureConfigStore racing = ConfigStoreHarness.storeWithOpener(configPath, directory -> {
+            // between the store's attribute read and its open, the entry names a different directory
+            Files.move(directory, directory.resolveSibling("brave-search-moved"));
+            ConfigStoreHarness.writeValidConfig(configPath, "attacker-token");
+            return SecureConfigStore.SecureStreamOpener.processFilesystem()
+                    .open(directory)
+                    .map(real -> new DelegatingSecureStream(real) {
+                        @Override
+                        public void close() throws IOException {
+                            streamClosed.set(true);
+                            super.close();
+                        }
+                    });
+        });
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, racing::load);
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(
+                failure.getMessage().contains("changed identity while it was opened"),
+                () -> failure.getMessage());
+        assertTrue(streamClosed.get(), "an opened directory stream must be closed when post-open validation refuses it");
+    }
+
+    @Test
+    void aConfigFileTheProcessCannotReadIsAFilesystemFailureNeverAnAbsentState() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        Path configEntry = ConfigStoreHarness.entryName(configPath);
+        SecureConfigStore unreadable = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public SeekableByteChannel newByteChannel(
+                                    Path entry, Set<? extends OpenOption> options, FileAttribute<?>... attrs)
+                                    throws IOException {
+                                if (configEntry.equals(entry)) {
+                                    throw new AccessDeniedException(entry.toString(), null, "Permission denied");
+                                }
+                                return delegate.newByteChannel(entry, options, attrs);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, unreadable::load);
+
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
+        assertTrue(failure.getMessage().contains("Permission denied"), () -> failure.getMessage());
+        LocalConfigException sight = assertThrows(LocalConfigException.class, unreadable::peekSummary);
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, sight.reason(), "a sight fails like a load");
     }
 
     @Test

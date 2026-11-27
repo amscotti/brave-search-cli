@@ -49,7 +49,7 @@ public abstract class PagedSearchPresenterBase<TReq, TRes extends PagedExchange,
         extends WalkPresenterBase<TReq, TRes> implements PagedSearchPresenter<TReq, TRes> {
 
     protected PagedSearchPresenterBase(
-            EnvelopeCodec envelopes, JsonlCodec jsonl, SearchPresenterBase.WarningsRouter warnings) {
+            EnvelopeCodec envelopes, JsonlCodec jsonl, WarningsRouter warnings) {
         super(envelopes, jsonl, warnings, WalkCounts.PAGES);
     }
 

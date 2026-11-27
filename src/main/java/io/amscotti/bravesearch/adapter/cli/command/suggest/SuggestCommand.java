@@ -8,12 +8,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.SuggestPresenter;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.SuggestDispatch;
-import io.amscotti.bravesearch.application.port.out.SuggestExchange;
-import io.amscotti.bravesearch.application.stream.CancellationContext;
+import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
-import io.amscotti.bravesearch.domain.config.Credential;
-import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.error.UsageValidationError;
 import io.amscotti.bravesearch.domain.output.CommandOutputProfile;
 import io.amscotti.bravesearch.domain.request.SuggestRequest;
@@ -52,8 +48,6 @@ public final class SuggestCommand extends RemoteCommandSupport<SuggestRequest, S
     /** Registration name under the root command. */
     public static final String NAME = "suggest";
 
-    private final SuggestExchange exchange;
-
     @Mixin
     CommonSearchOptions commonOptions;
 
@@ -80,7 +74,7 @@ public final class SuggestCommand extends RemoteCommandSupport<SuggestRequest, S
             CommonSearchOptions commonOptions,
             CredentialProvider storedCredentials,
             CredentialProvider loopbackTestToken,
-            SuggestExchange exchange,
+            RemoteExchange<SuggestRequest, SuggestSearchResult> exchange,
             SuggestPresenter presenter,
             CancellationRegistry cancellations,
             ResultWriter results,
@@ -90,12 +84,12 @@ public final class SuggestCommand extends RemoteCommandSupport<SuggestRequest, S
                 remoteOptions,
                 storedCredentials,
                 loopbackTestToken,
+                exchange,
                 presenter,
                 cancellations,
                 results,
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
-        this.exchange = Objects.requireNonNull(exchange, "exchange");
     }
 
     @Override
@@ -128,15 +122,4 @@ public final class SuggestCommand extends RemoteCommandSupport<SuggestRequest, S
         return builder.build();
     }
 
-    @Override
-    protected Outcome<SuggestSearchResult> exchange(SuggestRequest request, Credential credential, CancellationContext cancellation) {
-        return this.exchange.dispatch(new SuggestDispatch(
-                request,
-                remoteOptions.origin(),
-                credential,
-                remoteOptions.totalTimeout(),
-                remoteOptions.connectTimeout(),
-                remoteOptions.apiVersionPin(),
-                cancellation));
-    }
 }
