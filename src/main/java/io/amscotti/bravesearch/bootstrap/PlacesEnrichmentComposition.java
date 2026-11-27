@@ -31,11 +31,10 @@ import java.util.function.Function;
  * injectable so the root command line runs hermetically in tests; the process factory
  * binds the real environment lookup and transport adapters.
  *
- * <p>Each chunk dispatch is a self-contained lifecycle: the invocation's
- * already-resolved credential is handed to a fresh single-exchange gateway, whose
- * transport and HTTP client close with the gateway after the exchange, so one walk
- * never leaves an open client behind and never resolves its credential twice. The walk
- * requests its chunks strictly sequentially.
+ * <p>A sequential chunk walk opens one shared transport and HTTP client across every chunk
+ * through {@link RemoteExchange#openWalk} and closes it when the walk finishes, so one walk
+ * keeps its connection to the peer, never leaves an open client behind, and never resolves its
+ * credential twice. The walk requests its chunks strictly sequentially.
  *
  * <p>The fan-out walk's continuation rule: the enrichment endpoints document no
  * continuation field, so the orchestrator is wired with the always-continue probe —
@@ -57,18 +56,19 @@ public record PlacesEnrichmentComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static PlacesEnrichmentComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static PlacesEnrichmentComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static PlacesEnrichmentComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static PlacesEnrichmentComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static PlacesEnrichmentComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static PlacesEnrichmentComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<PlaceEnrichmentRequest, PlaceEnrichmentResult> exchange =
                 RemoteExchanges.blocking(PlaceEnrichmentEndpoint::assemble, PlaceEnrichmentResult::new, environmentLookup);

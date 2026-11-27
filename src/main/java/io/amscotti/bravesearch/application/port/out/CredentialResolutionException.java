@@ -66,7 +66,6 @@ public final class CredentialResolutionException extends Exception {
                 Category.INVALID, Optional.of(sourceName), false, "invalid credential from " + sourceName + ": " + reason);
     }
 
-    /** Why resolution failed. */
     /**
      * Whether no source at all provided a credential — every configured source came back empty —
      * as opposed to one named variable being unset or one source providing a broken value.
@@ -75,6 +74,7 @@ public final class CredentialResolutionException extends Exception {
         return noSourceProvided;
     }
 
+    /** Why resolution failed. */
     public Category category() {
         return category;
     }

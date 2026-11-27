@@ -42,7 +42,7 @@ final class RichCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        RichComposition process = RichComposition.process(storedCredentials(), environment);
+        RichComposition process = RichComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "rich", "--base-url", "http://127.0.0.1:1", "cb8f5a1e2d3c4b5a");
 
@@ -83,7 +83,11 @@ final class RichCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(exchanges, config, Compositions.process(storedCredentials(), environment, exchanges).withRichCallbacks(richCallbacks))
+            int exitCode = new Main(
+                            exchanges,
+                            config,
+                            Compositions.process(environment, exchanges).withRichCallbacks(richCallbacks),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

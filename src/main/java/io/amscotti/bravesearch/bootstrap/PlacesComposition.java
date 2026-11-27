@@ -42,18 +42,19 @@ public record PlacesComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static PlacesComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static PlacesComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static PlacesComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static PlacesComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static PlacesComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static PlacesComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<PlaceSearchRequest, PlaceSearchResult> exchange =
                 RemoteExchanges.blocking(PlaceSearchEndpoint::assemble, PlaceSearchResult::new, environmentLookup);

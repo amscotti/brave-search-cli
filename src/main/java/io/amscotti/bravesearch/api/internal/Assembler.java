@@ -36,7 +36,6 @@ import io.amscotti.bravesearch.application.port.out.SuggestPort;
 import io.amscotti.bravesearch.application.port.out.VideoSearchPort;
 import io.amscotti.bravesearch.application.port.out.WebSearchPort;
 import io.amscotti.bravesearch.application.stream.CancellationContext;
-import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import io.amscotti.bravesearch.domain.error.Outcome;
@@ -83,11 +82,12 @@ import tools.jackson.databind.JsonNode;
  *
  * <p>The credential travels only through the builder's explicit token supplier, resolved
  * per exchange; no environment or configuration-file precedence is ever applied here. The
- * origin is the production origin unless the builder pinned a loopback override, and the
- * origin's own routing rule keeps the supplier's credential away from any origin it did
- * not sign up for. The client owns the shared HTTP executor unless the builder supplied
- * one, and {@code close()} on the assembled client releases exactly what this composition
- * created: the live streams, the transport, and the owned executor.
+ * origin is the production origin unless the builder pinned a loopback override; the
+ * caller's own token supplier feeds both origins alike, so the caller decides what
+ * credential its supplier hands to either peer. The client owns the shared HTTP executor
+ * unless the builder supplied one, and {@code close()} on the assembled client releases
+ * exactly what this composition created: the live streams, any in-flight stream opens, the
+ * transport, and the owned executor.
  */
 public final class Assembler {
 
@@ -173,11 +173,15 @@ public final class Assembler {
         AnswersPort answers =
                 Assembler.<AnswersRequest, AnswersResult>gateway(transport, origin, storedCredentials, totalTimeout, AnswersEndpoint::assemble, AnswersResult::new)
                         ::exchange;
+        ClientExchangeRegistry streamRegistry = new ClientExchangeRegistry();
         Function<AnswersRequest, Outcome<OpenedAnswersStream>> answersStream =
-                streamOpener(origin, storedCredentials, connectTimeout);
+                streamOpener(origin, storedCredentials, connectTimeout, executor, streamRegistry);
         Function<String, JsonNode> tagPayloadReader = UpstreamJsonCodec::readTagPayload;
 
-        List<AutoCloseable> ownedResources = executorOwned ? List.of(executor, transport) : List.of(transport);
+        // released in reverse order: cancel in-flight stream opens first, then transport, then owned executor
+        List<AutoCloseable> ownedResources = executorOwned
+                ? List.of(executor, transport, streamRegistry)
+                : List.of(transport, streamRegistry);
         return new ClientWiring(
                 webSearch::search,
                 llmContext::search,
@@ -242,8 +246,11 @@ public final class Assembler {
      * exchange or latch type.
      */
     private static Function<AnswersRequest, Outcome<OpenedAnswersStream>> streamOpener(
-            BraveApiOrigin origin, TokenSupplierCredentials storedCredentials, Duration connectTimeout) {
-        CancellationRegistry registry = new ClientExchangeRegistry();
+            BraveApiOrigin origin,
+            TokenSupplierCredentials storedCredentials,
+            Duration connectTimeout,
+            ExecutorService executor,
+            ClientExchangeRegistry registry) {
         BraveHttpAnswersStreamGateway gateway =
                 new BraveHttpAnswersStreamGateway(
                         registry,
@@ -251,11 +258,14 @@ public final class Assembler {
                         ResponseLimits.production(),
                         StandardSemanticStream.standard(),
                         BraveHttpAnswersStreamGateway::daemonReader,
-                        Optional::empty);
+                        Optional::empty,
+                        executor);
         return request -> {
+            CancellationContext cancellation = new CancellationContext();
+            Runnable detach = registry.register(cancellation);
             try {
                 return switch (gateway.stream(new AnswersStreamDispatch(
-                        request, origin, storedCredentials.resolve(), connectTimeout, null))) {
+                        request, origin, storedCredentials.resolve(), connectTimeout, null, cancellation))) {
                     case Outcome.Success<AnswersStreamExchange> opened -> {
                         AnswersStreamExchange exchange = opened.value();
                         yield new Outcome.Success<>(new OpenedAnswersStream(
@@ -268,6 +278,8 @@ public final class Assembler {
                 };
             } catch (CredentialResolutionException unresolved) {
                 return new Outcome.Failure<>(FailureKind.LOCAL_CONFIG, unresolved.getMessage());
+            } finally {
+                detach.run();
             }
         };
     }

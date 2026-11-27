@@ -657,6 +657,43 @@ final class AnswersStreamPresenterImplTest {
     }
 
     @Test
+    void aLatchedUserSignalOutranksAWriteFailureOnTheTerminalMachineRecord() {
+        for (CancellationContext.Cause signal :
+                List.of(CancellationContext.Cause.SIGINT, CancellationContext.Cause.SIGTERM)) {
+            int expectedExit = signal == CancellationContext.Cause.SIGINT ? 130 : 143;
+            for (String writeFailure : List.of("Broken pipe", "No space left on device")) {
+                ScriptedStream jsonlScript = new ScriptedStream(List.of(new AnswerStreamEvent.Text("one")));
+                jsonlScript.latchThenEnd(signal);
+                RecordingWriter jsonlResults = new RecordingWriter();
+                jsonlResults.failFromWriteWith(2, writeFailure);
+                int jsonlExit = render(
+                        jsonlScript,
+                        output(OutputMode.JSONL, false, false),
+                        jsonlResults,
+                        new ByteArrayOutputStream());
+                assertEquals(
+                        expectedExit,
+                        jsonlExit,
+                        () -> "jsonl keeps " + signal + " status even when terminal write hits " + writeFailure);
+
+                ScriptedStream jsonScript = new ScriptedStream(List.of(new AnswerStreamEvent.Text("one")));
+                jsonScript.latchThenEnd(signal);
+                RecordingWriter jsonResults = new RecordingWriter();
+                jsonResults.failFromWriteWith(1, writeFailure);
+                int jsonExit = render(
+                        jsonScript,
+                        output(OutputMode.JSON, false, false),
+                        jsonResults,
+                        new ByteArrayOutputStream());
+                assertEquals(
+                        expectedExit,
+                        jsonExit,
+                        () -> "json keeps " + signal + " status even when terminal write hits " + writeFailure);
+            }
+        }
+    }
+
+    @Test
     void aConsumerDepartingBeforeTheHeadingWriteIsSilentZero() throws Exception {
         ScriptedStream script = new ScriptedStream(List.of(new AnswerStreamEvent.Text("never reached")));
         RecordingWriter results = new RecordingWriter();

@@ -3,6 +3,7 @@ package io.amscotti.bravesearch.adapter.config;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,6 +56,23 @@ final class LoopbackTestKeyCredentialsTest {
         assertEquals(CredentialResolutionException.Category.INVALID, failure.category());
         assertTrue(failure.getMessage().contains("BRAVE_SEARCH_TEST_KEY"), failure.getMessage());
         assertTrue(failure.getMessage().contains("control"), failure.getMessage());
+        assertEquals("environment BRAVE_SEARCH_TEST_KEY", failure.sourceName().orElseThrow());
+    }
+
+    @Test
+    void anUnwirableTestValueNamesTheVariableWithoutEchoingIt() {
+        String sentinel = "BSA-loopback-kappa-\u03ba";
+        Map<String, String> environment = new HashMap<>();
+        environment.put("BRAVE_SEARCH_TEST_KEY", sentinel);
+        LoopbackTestKeyCredentials source = new LoopbackTestKeyCredentials(environment::get);
+
+        CredentialResolutionException failure =
+                assertThrows(CredentialResolutionException.class, source::resolve);
+
+        assertEquals(CredentialResolutionException.Category.INVALID, failure.category());
+        assertTrue(failure.getMessage().contains("BRAVE_SEARCH_TEST_KEY"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("an HTTP header value cannot carry"), failure.getMessage());
+        assertFalse(failure.getMessage().contains("BSA-loopback-kappa"), failure.getMessage());
         assertEquals("environment BRAVE_SEARCH_TEST_KEY", failure.sourceName().orElseThrow());
     }
 }

@@ -14,6 +14,7 @@ import io.amscotti.bravesearch.application.exchange.ContentCoding;
 import io.amscotti.bravesearch.application.exchange.ExchangeCancelledException;
 import io.amscotti.bravesearch.application.exchange.HttpProxy;
 import io.amscotti.bravesearch.application.exchange.ResponseLimits;
+import io.amscotti.bravesearch.application.exchange.ResponseRejectionException;
 import io.amscotti.bravesearch.application.exchange.TotalDeadlineExceededException;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamExchange;
@@ -42,8 +43,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -76,9 +79,11 @@ import java.util.function.Supplier;
  * exchange with the exchange's raw publisher and cancellation context.
  *
  * <p>Deadline semantics: the headers phase is bounded by the tighter of the fixed 30-second
- * ceiling and the run's wall budget, because the cancellation latch cannot interrupt a
- * connect or a silent-header wait. Once the body opens, the run's shared cancellation context
- * — registered with the injected registry before the exchange opens and detached on every
+ * ceiling and the run's wall budget, and a cancellation guard interrupts the opening send
+ * the moment the run's cancellation context latches (a signal or a client close), so a
+ * silent-header wait ends promptly instead of running out its budget. Once the body opens,
+ * the run's shared cancellation context — reused when the dispatch carries one, or freshly
+ * registered with the injected registry before the exchange opens and detached on every
  * terminal path — arbitrates every ending: the idle window resets on every decoded body byte
  * (the progress-marking stream below the publisher marks each read), the wall deadline is
  * absolute from the opening call and heartbeats cannot extend it, and a deadline watchdog
@@ -105,6 +110,12 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
     /** The most decoded body bytes a malformed-open diagnostic preview reads. */
     private static final int PREVIEW_READ_BYTES = 1024;
 
+    /** The fixed diagnostic of a stream request whose assembly the JDK client refused. */
+    private static final String REQUEST_ASSEMBLY_FAILURE = "outbound request assembly failed";
+
+    /** The fixed diagnostic of a stream open ended by its run's cancellation latch. */
+    private static final String CANCELLED_STREAM_FAILURE = "upstream stream exchange cancelled";
+
     private final CancellationRegistry registry;
 
     private final Clock clock;
@@ -117,6 +128,9 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
 
     /** The proxy of each exchange, resolved when the exchange opens; empty means a direct connection. */
     private final Supplier<Optional<HttpProxy>> proxy;
+
+    /** Optional executor the per-stream HTTP client rides; null uses the JDK default. */
+    private final Executor clientExecutor;
 
     /**
      * @param readers the factory of the single-thread reader executor each open exchange
@@ -133,19 +147,58 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
             SemanticStreamAssembly semanticAssembly,
             Supplier<ExecutorService> readers,
             Supplier<Optional<HttpProxy>> proxy) {
+        this(registry, clock, limits, semanticAssembly, readers, proxy, Optional.empty());
+    }
+
+    /**
+     * The executor-aware wiring for compositions that route the stream client's internal
+     * tasks onto a chosen executor — the library composition routes its builder executor
+     * policy here, and the executor's lifecycle stays owned by whoever supplied it.
+     *
+     * @throws NullPointerException when any argument is null
+     */
+    public BraveHttpAnswersStreamGateway(
+            CancellationRegistry registry,
+            Clock clock,
+            ResponseLimits limits,
+            SemanticStreamAssembly semanticAssembly,
+            Supplier<ExecutorService> readers,
+            Supplier<Optional<HttpProxy>> proxy,
+            Executor clientExecutor) {
+        this(
+                registry,
+                clock,
+                limits,
+                semanticAssembly,
+                readers,
+                proxy,
+                Optional.of(Objects.requireNonNull(clientExecutor, "clientExecutor")));
+    }
+
+    private BraveHttpAnswersStreamGateway(
+            CancellationRegistry registry,
+            Clock clock,
+            ResponseLimits limits,
+            SemanticStreamAssembly semanticAssembly,
+            Supplier<ExecutorService> readers,
+            Supplier<Optional<HttpProxy>> proxy,
+            Optional<Executor> clientExecutor) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.limits = Objects.requireNonNull(limits, "limits");
         this.semanticAssembly = Objects.requireNonNull(semanticAssembly, "semanticAssembly");
         this.readers = Objects.requireNonNull(readers, "readers");
         this.proxy = Objects.requireNonNull(proxy, "proxy");
+        this.clientExecutor = clientExecutor.orElse(null);
     }
 
     /**
-     * Opens one streaming exchange: registers the run's cancellation context, performs the
-     * opening POST under the headers-phase ceiling, and either hands back the live exchange
-     * or the expected failure of an exchange that never opened — with the registry detached
-     * and the client released on every failing path, the rethrowing ones included.
+     * Opens one streaming exchange: reuses the dispatch's cancellation context (or registers a
+     * fresh one when absent), performs the opening POST under the headers-phase ceiling and
+     * cancellation guard, and either hands back the live exchange or the expected failure of
+     * an exchange that never opened — with the registry detached (when this gateway
+     * registered it) and the client released on every failing path, the rethrowing ones
+     * included.
      *
      * @throws IllegalArgumentException when the invocation's request does not carry
      *     {@code stream=true}
@@ -156,12 +209,19 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
         // resolved before anything is registered or opened: an unusable proxy value fails the
         // open as a local-configuration error and leaves nothing behind to release
         Optional<HttpProxy> route = proxy.get();
-        CancellationContext cancellation = new CancellationContext();
-        Runnable detach = registry.register(cancellation);
+        CancellationContext provided = invocation.cancellation();
+        CancellationContext cancellation = provided != null ? provided : new CancellationContext();
+        if (cancellation.cancelled()) {
+            return new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE);
+        }
+        Runnable detach = provided != null ? () -> {} : registry.register(cancellation);
         HttpClient.Builder building = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(invocation.connectTimeout());
-        route.ifPresent(configured -> building.proxy(BraveHttpClientFactory.proxySelector(configured)));
+                .connectTimeout(invocation.connectTimeout())
+                .proxy(route.map(BraveHttpClientFactory::proxySelector).orElse(HttpClient.Builder.NO_PROXY));
+        if (clientExecutor != null) {
+            building.executor(clientExecutor);
+        }
         HttpClient client = building.build();
         try {
             return open(invocation, cancellation, detach, client);
@@ -190,13 +250,61 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
         Duration wall = resolveWall(request);
         Instant openedAt = clock.instant();
         Instant wallDeadline = wall == null ? null : openedAt.plus(wall);
-        HttpRequest outgoing = assemble(api, resolveHeadersTimeout(wall));
-        HttpResponse<InputStream> response;
+        HttpRequest outgoing;
         try {
+            outgoing = assemble(api, resolveHeadersTimeout(wall));
+        } catch (IllegalArgumentException rejectedAssembly) {
+            // the client's own message embeds the rejected header line; the fixed diagnostic is
+            // the only safe rendering of an unsendable assembly
+            return refuseOpen(
+                    client, detach, new Outcome.Failure<>(FailureKind.INTERNAL, REQUEST_ASSEMBLY_FAILURE));
+        }
+        HttpResponse<InputStream> response;
+        AtomicBoolean guardFired = new AtomicBoolean();
+        Thread interrupter = cancellationGuard(cancellation, guardFired);
+        boolean unwindingInterruption = false;
+        interrupter.start();
+        try {
+            if (cancellation.cancelled()) {
+                return refuseOpen(
+                        client, detach, new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE));
+            }
             response = client.send(outgoing, HttpResponse.BodyHandlers.ofInputStream());
         } catch (IOException transportLevel) {
-            release(client, detach);
-            return TransportFailureMapping.of(transportLevel);
+            if (cancellation.cancelled()) {
+                return refuseOpen(
+                        client, detach, new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE));
+            }
+            return refuseOpen(client, detach, TransportFailureMapping.of(transportLevel));
+        } catch (InterruptedException interrupted) {
+            if (cancellation.cancelled()) {
+                return refuseOpen(
+                        client, detach, new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE));
+            }
+            unwindingInterruption = true;
+            throw interrupted;
+        } finally {
+            interrupter.interrupt();
+            boolean externalInterruptDuringJoin = false;
+            while (interrupter.isAlive()) {
+                try {
+                    interrupter.join();
+                } catch (InterruptedException waited) {
+                    externalInterruptDuringJoin = true;
+                }
+            }
+            if (guardFired.get() || cancellation.cancelled()) {
+                if (!unwindingInterruption) {
+                    Thread.interrupted();
+                }
+            } else if (externalInterruptDuringJoin) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (cancellation.cancelled()) {
+            consumeQuietly(response.body());
+            return refuseOpen(
+                    client, detach, new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE));
         }
         int status = response.statusCode();
         HttpHeaders headers = response.headers();
@@ -320,8 +428,10 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
                     clock,
                     wallDeadline,
                     cancellation);
+        } catch (ResponseRejectionException rejected) {
+            return new Outcome.Failure<>(FailureKind.MALFORMED, rejected.getMessage(), null, null, status);
         } catch (ExchangeCancelledException cancelled) {
-            return new Outcome.Failure<>(FailureKind.TRANSPORT, "upstream stream exchange cancelled");
+            return new Outcome.Failure<>(FailureKind.TRANSPORT, CANCELLED_STREAM_FAILURE);
         } catch (TotalDeadlineExceededException exceeded) {
             return new Outcome.Failure<>(FailureKind.TRANSPORT, "upstream stream exchange exceeded its wall budget");
         } catch (IOException unreadable) {
@@ -417,6 +527,22 @@ public final class BraveHttpAnswersStreamGateway implements AnswersStreamPort {
      */
     private byte[] previewPrefix(InputStream body, Instant wallDeadline, CancellationContext cancellation) {
         return BoundedBodyHandler.preview(body, PREVIEW_READ_BYTES, clock, wallDeadline, cancellation);
+    }
+
+    /** Interrupts the opening send thread the moment {@code cancellation} latches. */
+    private static Thread cancellationGuard(CancellationContext cancellation, AtomicBoolean guardFired) {
+        Thread sender = Thread.currentThread();
+        return Thread.ofVirtual()
+                .name("stream-open-cancellation-guard")
+                .unstarted(() -> {
+                    try {
+                        cancellation.await();
+                    } catch (InterruptedException stoppedEarly) {
+                        return;
+                    }
+                    guardFired.set(true);
+                    sender.interrupt();
+                });
     }
 
     private static void consumeQuietly(InputStream body) {

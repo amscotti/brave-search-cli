@@ -156,7 +156,7 @@ The library surface shipped, and this record now describes the as-built shape (s
   outcome rather than a broken tree.
 - The public streaming surface settled as decided: `AnswersStreamHandle` exposes the
   memoized `Flow.Publisher<PublicStreamFrame>` and a public `StreamCancellation`
-  (`cancel()`/`cancelled()`), while `AnswersExchange`, the internal publishers, and
+  (`cancel()`/`cancelled()`), while `AnswersStreamExchange`, the internal publishers, and
   `CancellationContext` stay internal. `PublicStreamFrame` is sealed over `Text`,
   `Tagged`, and `UnknownTag` records whose payload text is the exact tag payload, never a
   re-encoded JSON view — passthrough framing noise is not projected at all. The `Tagged`
@@ -166,8 +166,9 @@ The library surface shipped, and this record now describes the as-built shape (s
   past the two exported boundary types.
 - The public builder requires an explicit `tokenSupplier`, never applies environment or
   config precedence, and offers the documented budgets, a caller-owned executor option,
-  and a loopback-only `baseUrl` override whose origin routing can never move credentials
-  off the production origin. `close()` cancels live streams, closes the shared transport,
+  and a loopback-only `baseUrl` override where the caller's own token supplier feeds both
+  the production origin and the override alike (the caller controls what its supplier
+  returns). `close()` cancels live streams, closes the shared transport,
   shuts the owned executor down, and leaves caller-supplied executors alone.
 - The exported-types allowlist moved to `docs/java-api.md` as its normative home; the
   architecture rule and that list change together by construction.

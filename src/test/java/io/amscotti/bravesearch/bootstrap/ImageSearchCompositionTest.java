@@ -42,7 +42,7 @@ final class ImageSearchCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        ImageSearchComposition process = ImageSearchComposition.process(storedCredentials(), environment);
+        ImageSearchComposition process = ImageSearchComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "images", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -83,7 +83,11 @@ final class ImageSearchCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(exchanges, config, Compositions.process(storedCredentials(), environment, exchanges).withImagesSearch(imagesSearch))
+            int exitCode = new Main(
+                            exchanges,
+                            config,
+                            Compositions.process(environment, exchanges).withImagesSearch(imagesSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

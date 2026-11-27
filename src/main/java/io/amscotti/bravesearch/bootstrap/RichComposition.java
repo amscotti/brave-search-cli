@@ -41,18 +41,19 @@ public record RichComposition(CredentialProvider loopbackTestToken, RemoteExchan
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static RichComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static RichComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static RichComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static RichComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static RichComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static RichComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<RichRequest, RichResult> exchange =
                 RemoteExchanges.blocking(RichEndpoint::assemble, RichResult::new, environmentLookup);

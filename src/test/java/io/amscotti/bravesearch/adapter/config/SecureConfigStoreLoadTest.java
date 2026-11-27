@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileAttribute;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -240,11 +241,20 @@ final class SecureConfigStoreLoadTest {
     void loadRefusesAManagedDirectorySwappedForAnotherWhileItWasBeingOpened() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
+        AtomicBoolean streamClosed = new AtomicBoolean();
         SecureConfigStore racing = ConfigStoreHarness.storeWithOpener(configPath, directory -> {
             // between the store's attribute read and its open, the entry names a different directory
             Files.move(directory, directory.resolveSibling("brave-search-moved"));
             ConfigStoreHarness.writeValidConfig(configPath, "attacker-token");
-            return SecureConfigStore.SecureStreamOpener.processFilesystem().open(directory);
+            return SecureConfigStore.SecureStreamOpener.processFilesystem()
+                    .open(directory)
+                    .map(real -> new DelegatingSecureStream(real) {
+                        @Override
+                        public void close() throws IOException {
+                            streamClosed.set(true);
+                            super.close();
+                        }
+                    });
         });
 
         LocalConfigException failure = assertThrows(LocalConfigException.class, racing::load);
@@ -253,6 +263,7 @@ final class SecureConfigStoreLoadTest {
         assertTrue(
                 failure.getMessage().contains("changed identity while it was opened"),
                 () -> failure.getMessage());
+        assertTrue(streamClosed.get(), "an opened directory stream must be closed when post-open validation refuses it");
     }
 
     @Test

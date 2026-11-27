@@ -180,9 +180,10 @@ failure exits `6` with exactly one stderr diagnostic line.
 The local-configuration exit status `3` covers: no credential source provides a key; a
 present source provides an invalid one; the config file or its directory fails a refusal
 condition; the platform has no supported credential-file path or the path settings are
-unusable; the filesystem cannot support the safe-access contract; and a secret that cannot
-be read because no console exists and `--stdin` was not requested, or because the stdin
-line violated the one-line contract.
+unusable; the filesystem cannot support the safe-access contract; a proxy environment
+variable (`HTTPS_PROXY`/`https_proxy`) carries a value the client cannot honor; and a
+secret that cannot be read because no console exists and `--stdin` was not requested, or
+because the stdin line violated the one-line contract.
 
 ## Residual threat model
 

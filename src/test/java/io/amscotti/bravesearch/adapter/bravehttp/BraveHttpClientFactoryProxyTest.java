@@ -2,6 +2,7 @@ package io.amscotti.bravesearch.adapter.bravehttp;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.amscotti.bravesearch.application.exchange.HttpProxy;
@@ -10,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -40,9 +42,14 @@ final class BraveHttpClientFactoryProxyTest {
             List<Proxy> routes = selector.select(URI.create("https://api.search.brave.com/web/search?q=q"));
             assertEquals(1, routes.size(), "one route: the proxy");
             assertEquals(Proxy.Type.HTTP, routes.getFirst().type());
-            assertEquals(new InetSocketAddress("127.0.0.1", standIn.baseUrl().getPort()), routes.getFirst().address());
+            assertEquals(
+                    InetSocketAddress.createUnresolved("127.0.0.1", standIn.baseUrl().getPort()),
+                    routes.getFirst().address());
+            assertTrue(
+                    ((InetSocketAddress) routes.getFirst().address()).isUnresolved(),
+                    "proxy selection defers DNS resolution to connection establishment");
 
-            java.net.http.HttpClient client =
+            HttpClient client =
                     new BraveHttpClientFactory(Duration.ofSeconds(5)).newClient(Optional.of(configured));
             java.net.http.HttpRequest outgoing = java.net.http.HttpRequest.newBuilder(
                             URI.create("http://api.search.brave.com/web/search?q=q"))
@@ -69,5 +76,34 @@ final class BraveHttpClientFactoryProxyTest {
         assertEquals(List.of(Proxy.NO_PROXY), selector.select(URI.create("https://www.example.com/x")), "a bypass entry");
         assertEquals(1, selector.select(URI.create("https://api.search.brave.com/x")).size());
         assertTrue(selector.select(URI.create("https://api.search.brave.com/x")).getFirst().address() instanceof InetSocketAddress);
+    }
+
+    @Test
+    void proxySelectorDefersResolutionAndGuardsNullTargetOrHost() {
+        ProxySelector selector =
+                BraveHttpClientFactory.proxySelector(new HttpProxy("proxy.invalid", 3128, List.of()));
+
+        assertThrows(IllegalArgumentException.class, () -> selector.select(null));
+        assertEquals(
+                List.of(Proxy.NO_PROXY),
+                selector.select(URI.create("mailto:user@example.com")),
+                "a URI with no host falls back to direct");
+        Proxy chosen = selector.select(URI.create("https://api.search.brave.com/x")).getFirst();
+        InetSocketAddress address = (InetSocketAddress) chosen.address();
+        assertTrue(address.isUnresolved(), "a hostname proxy stays unresolved inside select()");
+        assertEquals("proxy.invalid", address.getHostString());
+        assertEquals(3128, address.getPort());
+    }
+
+    @Test
+    void anEmptyProxyExplicitlyPinsNoProxyInsteadOfInheritingTheJvmDefault() {
+        try (HttpClient client = new BraveHttpClientFactory(Duration.ofSeconds(5)).newClient(Optional.empty())) {
+            ProxySelector configured = client.proxy()
+                    .orElseThrow(() -> new AssertionError("no-proxy selector must be explicitly pinned"));
+            assertEquals(
+                    List.of(Proxy.NO_PROXY),
+                    configured.select(URI.create("https://api.search.brave.com/res/v1/web/search")),
+                    "an absent proxy connects directly without consulting ProxySelector.getDefault()");
+        }
     }
 }

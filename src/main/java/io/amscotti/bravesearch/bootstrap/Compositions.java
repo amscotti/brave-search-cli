@@ -3,7 +3,6 @@ package io.amscotti.bravesearch.bootstrap;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonlCodec;
 import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
-import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.stream.CancellationRegistry;
 import java.util.Objects;
 import java.util.function.Function;
@@ -45,14 +44,14 @@ public record Compositions(
     }
 
     /** The process wiring: real environment lookups, real transports, one machine mapper set. */
-    public static Compositions process(CredentialProvider storedCredentials, CancellationRegistry registry) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup(), registry);
+    public static Compositions process(CancellationRegistry registry) {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup(), registry);
     }
 
     /** The shared process wiring over machine codecs of its own. */
-    static Compositions process(CredentialProvider storedCredentials, Function<String, String> environment, CancellationRegistry registry) {
+    static Compositions process(Function<String, String> environment, CancellationRegistry registry) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environment, registry, mappers, new JsonlCodec(mappers));
+        return process(environment, registry, mappers, new JsonlCodec(mappers));
     }
 
     /**
@@ -61,23 +60,22 @@ public record Compositions(
      * set, so a process builds exactly one however many endpoints it wires.
      */
     static Compositions process(
-            CredentialProvider storedCredentials,
             Function<String, String> environment,
             CancellationRegistry registry,
             JsonMappers mappers,
             JsonlCodec jsonl) {
         return new Compositions(
-                WebSearchComposition.process(storedCredentials, environment, mappers, jsonl),
-                ContextComposition.process(storedCredentials, environment, mappers, jsonl),
-                NewsSearchComposition.process(storedCredentials, environment, mappers, jsonl),
-                VideoSearchComposition.process(storedCredentials, environment, mappers, jsonl),
-                ImageSearchComposition.process(storedCredentials, environment, mappers, jsonl),
-                SuggestComposition.process(storedCredentials, environment, mappers, jsonl),
-                SpellcheckComposition.process(storedCredentials, environment, mappers, jsonl),
-                PlacesComposition.process(storedCredentials, environment, mappers, jsonl),
-                PlacesEnrichmentComposition.process(storedCredentials, environment, mappers, jsonl),
-                RichComposition.process(storedCredentials, environment, mappers, jsonl),
-                AnswersComposition.process(storedCredentials, environment, registry, mappers, jsonl));
+                WebSearchComposition.process(environment, mappers, jsonl),
+                ContextComposition.process(environment, mappers, jsonl),
+                NewsSearchComposition.process(environment, mappers, jsonl),
+                VideoSearchComposition.process(environment, mappers, jsonl),
+                ImageSearchComposition.process(environment, mappers, jsonl),
+                SuggestComposition.process(environment, mappers, jsonl),
+                SpellcheckComposition.process(environment, mappers, jsonl),
+                PlacesComposition.process(environment, mappers, jsonl),
+                PlacesEnrichmentComposition.process(environment, mappers, jsonl),
+                RichComposition.process(environment, mappers, jsonl),
+                AnswersComposition.process(environment, registry, mappers, jsonl));
     }
 
     /** This wiring with the web command's composition replaced. */

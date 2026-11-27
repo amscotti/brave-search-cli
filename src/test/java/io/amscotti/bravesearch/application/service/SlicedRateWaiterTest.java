@@ -113,6 +113,50 @@ final class SlicedRateWaiterTest {
         assertEquals("pagination wait cancelled", aborted.getMessage());
     }
 
+    @Test
+    void aSubMillisecondRemainderSkipsWaitingAndReportsZero() throws Exception {
+        MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_700_000_000));
+        SlicedRateWaiter waiter = new SlicedRateWaiter(clock);
+
+        Duration waited = waiter.await(clock.instant().plusNanos(500_000), new CancellationContext());
+
+        assertEquals(Duration.ZERO, waited, "sub-millisecond remainders skip sleeping and report zero");
+    }
+
+    @Test
+    void aMidWaitCancellationWakesPromptlyWithoutAnInterruptFlag() throws Exception {
+        MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_700_000_000));
+        CancellationContext cancellation = new CancellationContext();
+        SlicedRateWaiter waiter = new SlicedRateWaiter(clock);
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean interruptedAfter = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread waiting = new Thread(() -> {
+            entered.countDown();
+            try {
+                waiter.await(clock.instant().plus(Duration.ofSeconds(30)), cancellation);
+            } catch (InterruptedException aborted) {
+                thrown.set(aborted);
+                interruptedAfter.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        waiting.start();
+        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        Thread.sleep(30);
+
+        long startedAt = System.nanoTime();
+        cancellation.latch(CancellationContext.Cause.SIGINT);
+        waiting.join(java.util.concurrent.TimeUnit.SECONDS.toMillis(5));
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertFalse(waiting.isAlive(), "latching cancellation ends the wait promptly");
+        assertTrue(elapsedMs < 2000, "woke promptly instead of waiting 30s: " + elapsedMs + " ms");
+        assertTrue(thrown.get() instanceof InterruptedException);
+        assertEquals("pagination wait cancelled", thrown.get().getMessage());
+        assertFalse(interruptedAfter.get(), "cancellation abort leaves no phantom interrupt flag");
+    }
+
     /** Clock whose instant moves only when the test advances it. */
     private static final class MutableClock extends Clock {
 

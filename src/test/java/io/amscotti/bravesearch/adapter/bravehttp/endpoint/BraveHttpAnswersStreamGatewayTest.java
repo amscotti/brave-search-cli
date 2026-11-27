@@ -972,6 +972,170 @@ final class BraveHttpAnswersStreamGatewayTest {
         }
     }
 
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void aProvidedCancellationContextIsReusedWithoutReRegisteringAndCutsAHeadersWait() throws Exception {
+        CountDownLatch neverSendHeaders = new CountDownLatch(1);
+        RecordingRegistry registry = new RecordingRegistry();
+        CapturingGateway gateway = new CapturingGateway(registry);
+        CancellationContext callerContext = new CancellationContext();
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .holdHeadersUntil(neverSendHeaders)
+                .header("Content-Type", "text/event-stream")
+                .writeBytes(doneMarker())
+                .start()) {
+            Thread.ofVirtual().start(() -> {
+                try {
+                    assertTrue(server.awaitFirstRequest(AWAIT));
+                    TimeUnit.MILLISECONDS.sleep(150);
+                } catch (InterruptedException waiting) {
+                    Thread.currentThread().interrupt();
+                }
+                callerContext.latch(CancellationContext.Cause.SIGINT);
+            });
+
+            long startedAt = System.nanoTime();
+            Outcome<AnswersStreamExchange> outcome = gateway.stream(new AnswersStreamDispatch(
+                    streamRequest(null, null),
+                    BraveApiOrigin.fromOverride(
+                            server.baseUrl().toString(),
+                            host -> {
+                                throw new AssertionError("literals are never resolved");
+                            }),
+                    Credential.of(SENTINEL.getBytes(UTF_8)),
+                    Duration.ofSeconds(5),
+                    null,
+                    callerContext));
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+            Outcome.Failure<AnswersStreamExchange> failure = failing(outcome);
+            assertEquals(FailureKind.TRANSPORT, failure.kind());
+            assertEquals("upstream stream exchange cancelled", failure.diagnostic());
+            assertTrue(elapsedMs < 5000, "a latched headers wait ends promptly: " + elapsedMs + " ms");
+            assertFalse(Thread.currentThread().isInterrupted(), "converted cancellation leaves interrupt status clear");
+            assertNull(registry.registered(), "a dispatch-provided context is not registered on the gateway registry");
+        } finally {
+            neverSendHeaders.countDown();
+        }
+    }
+
+    @Test
+    void anAlreadyCancelledDispatchFailsImmediatelyWithoutRegisteringOrConnecting() throws Exception {
+        RecordingRegistry registry = new RecordingRegistry();
+        CapturingGateway gateway = new CapturingGateway(registry);
+        CancellationContext alreadyCancelled = new CancellationContext();
+        alreadyCancelled.latch(CancellationContext.Cause.SIGTERM);
+        try (ScriptedSseServer server = smallEventStream()) {
+            Outcome<AnswersStreamExchange> outcome = gateway.stream(new AnswersStreamDispatch(
+                    streamRequest(null, null),
+                    BraveApiOrigin.fromOverride(
+                            server.baseUrl().toString(),
+                            host -> {
+                                throw new AssertionError("literals are never resolved");
+                            }),
+                    Credential.of(SENTINEL.getBytes(UTF_8)),
+                    Duration.ofSeconds(5),
+                    null,
+                    alreadyCancelled));
+
+            Outcome.Failure<AnswersStreamExchange> failure = failing(outcome);
+            assertEquals(FailureKind.TRANSPORT, failure.kind());
+            assertEquals("upstream stream exchange cancelled", failure.diagnostic());
+            assertTrue(server.requests().isEmpty(), "no connection is opened for an already-cancelled dispatch");
+            assertNull(registry.registered(), "nothing is registered for a dispatch-provided context");
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void anOversizedNon2xxErrorBodyClassifiesAsMalformed() throws Exception {
+        byte[] oversized = ("{\"error\":{\"detail\":\"" + "x".repeat(256) + "\"}}").getBytes(UTF_8);
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .statusCode(500)
+                .header("Content-Type", "application/json")
+                .writeBytes(oversized)
+                .start()) {
+            RecordingRegistry registry = new RecordingRegistry();
+            BraveHttpAnswersStreamGateway bounded = new BraveHttpAnswersStreamGateway(
+                    registry,
+                    Clock.systemUTC(),
+                    new io.amscotti.bravesearch.application.exchange.ResponseLimits(8 * 1024, 8 * 1024, 64),
+                    CapturingGateway.compositionRootAssembly(),
+                    BraveHttpAnswersStreamGateway::daemonReader,
+                    java.util.Optional::empty);
+
+            Outcome.Failure<AnswersStreamExchange> failure =
+                    failing(bounded.stream(dispatch(server, streamRequest(null, null))));
+
+            assertEquals(FailureKind.MALFORMED, failure.kind());
+            assertEquals(500, failure.httpStatus());
+            assertEquals("response exceeds structured error limit", failure.diagnostic());
+            assertTrue(registry.awaitDetached(AWAIT));
+        }
+    }
+
+    @Test
+    void anUnsendableHeaderLineFailsWithFixedRedactedInternalDiagnostic() throws Exception {
+        try (ScriptedSseServer server = smallEventStream()) {
+            RecordingRegistry registry = new RecordingRegistry();
+            CapturingGateway gateway = new CapturingGateway(registry);
+            AnswersStreamDispatch badPin = new AnswersStreamDispatch(
+                    streamRequest(null, null),
+                    BraveApiOrigin.fromOverride(
+                            server.baseUrl().toString(),
+                            host -> {
+                                throw new AssertionError("literals are never resolved");
+                            }),
+                    Credential.of(SENTINEL.getBytes(UTF_8)),
+                    Duration.ofSeconds(5),
+                    "2026-08-30\r\nX-Injected: 1",
+                    null);
+
+            Outcome.Failure<AnswersStreamExchange> failure = failing(gateway.stream(badPin));
+
+            assertEquals(FailureKind.INTERNAL, failure.kind());
+            assertEquals("outbound request assembly failed", failure.diagnostic());
+            assertFalse(failure.diagnostic().contains(SENTINEL), "diagnostic must never leak token material");
+            assertTrue(server.requests().isEmpty());
+            assertTrue(registry.awaitDetached(AWAIT));
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 20, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void theExecutorAwareConstructorRoutesStreamHttpTasksOntoTheSuppliedExecutor() throws Exception {
+        AtomicBoolean ranOnSuppliedExecutor = new AtomicBoolean();
+        ExecutorService supplied = java.util.concurrent.Executors.newCachedThreadPool(task -> {
+            ranOnSuppliedExecutor.set(true);
+            Thread thread = new Thread(task, "stream-client-custom-exec");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try (ScriptedSseServer server = smallEventStream()) {
+            BraveHttpAnswersStreamGateway gateway = new BraveHttpAnswersStreamGateway(
+                    new RecordingRegistry(),
+                    Clock.systemUTC(),
+                    io.amscotti.bravesearch.application.exchange.ResponseLimits.production(),
+                    CapturingGateway.compositionRootAssembly(),
+                    BraveHttpAnswersStreamGateway::daemonReader,
+                    java.util.Optional::empty,
+                    supplied);
+
+            Outcome<AnswersStreamExchange> outcome = gateway.stream(dispatch(server, streamRequest(null, null)));
+            AnswersStreamExchange exchange = switch (outcome) {
+                case Outcome.Success<AnswersStreamExchange> success -> success.value();
+                case Outcome.Failure<AnswersStreamExchange> failure ->
+                        throw new AssertionError("expected open stream, saw " + failure.diagnostic());
+            };
+            exchange.close();
+
+            assertTrue(ranOnSuppliedExecutor.get(), "the stream HTTP client must use the supplied executor");
+            assertFalse(supplied.isShutdown(), "closing a stream exchange never shuts down the caller executor");
+        } finally {
+            supplied.shutdownNow();
+        }
+    }
+
     /** Raw consumer: records delivered chunks and their arrival, with manually granted demand. */
     private static final class RawSubscriber implements Flow.Subscriber<byte[]> {
 

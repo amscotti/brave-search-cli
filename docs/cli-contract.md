@@ -147,17 +147,21 @@ environment seam the configuration adapter owns: `HTTPS_PROXY` (or `https_proxy`
 names an upstream HTTP proxy, and `NO_PROXY` (or `no_proxy`) is a comma-separated
 list of the origins reached directly — a host, a domain together with its
 subdomains, an entry with a leading dot, or `*` for every origin. The uppercase
-spelling wins over the lowercase one, an unset or blank proxy variable means a
-direct connection, and the proxy is resolved when a run opens its exchange, so a
-command that makes no exchange never consults it.
+spelling wins over the lowercase one even when explicitly set to a blank value —
+setting `HTTPS_PROXY=""` overrides an inherited `https_proxy` to a direct
+connection, and setting `NO_PROXY=""` overrides an inherited `no_proxy` to an empty
+bypass list. An unset or blank effective proxy variable means a direct connection
+(ignoring JVM default proxy selectors), and the proxy is resolved when a run opens
+its exchange, so a command that makes no exchange never consults it.
 
 Two rules are fixed. A loopback origin — a `--base-url` override — is never
 proxied. And only plain HTTP proxies are honored: the client tunnels an HTTPS
 request through the proxy and never authenticates to the proxy itself, so
-`socks5://…`, `https://…`, an address carrying a user name and password, or an
-unparsable address is a configuration error (exit `3`) whose one diagnostic names
-the rule and never the value, because a proxy address may carry credentials. The
-subscription token is sealed inside the request's own TLS session on either route.
+`socks5://…`, `https://…`, an address carrying a user name and password, a non-root
+path, query, fragment, trailing empty port, or an unparsable address is a
+configuration error (exit `3`) whose one diagnostic names the rule and never the
+value, because a proxy address may carry credentials. The subscription token is
+sealed inside the request's own TLS session on either route.
 
 ## Output modes
 
@@ -1134,11 +1138,11 @@ goggle family are unknown options here.
   cancellable wait that runs until that window's reset instant — anchored at the
   observation of its headers, so only the reset still outstanding at wait start is waited —
   and the paced request reports `waited_ms` in the JSON envelope's upstream entry. Each
-  wait is announced on stderr before it happens as `places details: waiting <time> for
-  the rate-limit window to reset before request <n>` (always in the human mode, under
-  `--verbose` in a machine mode, never under `--quiet`), and a wait
-  whose outstanding reset exceeds one minute is refused: the run ends as a rate-limited
-  failure (exit `5`) naming the outstanding time and the completed requests.
+  wait is announced on stderr before it happens as `places.details: waiting <time> for
+  the rate-limit window to reset before request <n>` (or `places.describe:` for describe;
+  always in the human mode, under `--verbose` in a machine mode, never under `--quiet`),
+  and a wait whose outstanding reset exceeds one minute is refused: the run ends as a
+  rate-limited failure (exit `5`) naming the outstanding time and the completed requests.
 - **Order reconstruction:** duplicate input ids are preserved and the input order is
   reconstructed by matching returned ids: a returned id fills every input position
   that carries it, and a missing or expired id keeps its original position as a
@@ -1401,15 +1405,6 @@ like an option"), rather than in a duplicated footer, so the guidance stays besi
 argument it protects. Numeric limits stay visible where users pick values — the place id
 budget in the `details`/`describe` positional descriptions, the page and walk-budget
 ranges in the `<1..10>` parameter labels.
-
-## Deferred contract notes
-
-Where the unfinished edges of this contract will settle, recorded so consumers can see them
-coming:
-
-- Upstream metadata headers that are malformed, negative, or misaligned are dropped or
-  clamped where the headers are parsed, nonfatally with notes; the metadata diagnostic lines
-  reach a human output channel when a verbose flag exists to carry them.
 
 ## Pagination
 

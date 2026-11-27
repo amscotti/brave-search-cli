@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -21,15 +23,39 @@ final class TestTaskIndependenceTest {
 
     private static final Path BUILD_SCRIPT = Paths.get("build.gradle.kts");
 
-    /** Readable by the other build-contract gates of this package. */
     static final String TEST_TASK = "tasks.named<Test>(\"test\")";
 
-    private static final String RELEASE_TASK = "tasks.register<Test>(\"releaseArchiveTest\")";
+    private static final List<Pattern> PLAIN_TEST_OPENERS = List.of(
+            Pattern.compile("\\btasks\\s*\\.\\s*named\\s*<\\s*Test\\s*>\\s*\\(\\s*\"test\"\\s*\\)\\s*\\{"),
+            Pattern.compile("\\btasks\\s*\\.\\s*named\\s*\\(\\s*\"test\"\\s*\\)\\s*\\{"),
+            Pattern.compile("\\btasks\\s*\\.\\s*test\\s*\\{"),
+            Pattern.compile("\\bnamed\\s*<\\s*JvmTestSuite\\s*>\\s*\\(\\s*\"test\"\\s*\\)\\s*\\{"),
+            Pattern.compile("\\btasks\\s*\\.\\s*withType\\s*<\\s*Test\\s*>\\s*\\(\\s*\\)\\s*\\.\\s*configureEach\\s*\\{"),
+            Pattern.compile("\\btasks\\s*\\.\\s*withType\\s*<\\s*Test\\s*>\\s*\\{"));
+
+    private static final Pattern RELEASE_TASK_OPENER =
+            Pattern.compile("\\btasks\\s*\\.\\s*register\\s*<\\s*Test\\s*>\\s*\\(\\s*\"releaseArchiveTest\"\\s*\\)\\s*\\{");
+
+    private static final List<Pattern> CHECK_TASK_OPENERS = List.of(
+            Pattern.compile("\\btasks\\s*\\.\\s*named\\s*\\(\\s*\"check\"\\s*\\)\\s*\\{"),
+            Pattern.compile("\\btasks\\s*\\.\\s*check\\s*\\{"));
 
     private static final String VERIFICATION_CLASS = "io.amscotti.bravesearch.release.ReleaseArchiveVerificationTest";
 
-    /** What couples a task to the release chain: the checksum task, the archive, and its paths. */
-    private static final List<String> RELEASE_COUPLING =
+    /** Release-chain tokens that must never reach the plain test task or shared Test configuration. */
+    private static final List<String> FORBIDDEN_IN_PLAIN_TEST = List.of(
+            "sha256Sums",
+            "releaseArchivePath",
+            "releaseDirectory",
+            "releaseArchive",
+            "releaseSbom",
+            "nativeCompile",
+            "publishToMavenLocal",
+            "publishLibraryPublicationToMavenLocal",
+            "brave.search.release");
+
+    /** What couples the release-archive task to the release chain: the checksum task, archive, and paths. */
+    private static final List<String> REQUIRED_IN_RELEASE_TASK =
             List.of("sha256Sums", "releaseArchivePath", "releaseDirectory", "brave.search.release");
 
     private static final Path VERIFICATION_SOURCE =
@@ -38,13 +64,13 @@ final class TestTaskIndependenceTest {
 
     @Test
     void plainTestTaskRunsWithoutTheReleaseChainAndLeavesOutTheReleaseVerification() throws IOException {
-        String build = Files.readString(BUILD_SCRIPT, StandardCharsets.UTF_8);
-        String configurations = everyConfigurationBlock(build, TEST_TASK);
+        String build = stripComments(Files.readString(BUILD_SCRIPT, StandardCharsets.UTF_8));
+        String configurations = everyConfigurationBlock(build, PLAIN_TEST_OPENERS);
 
         assertTrue(!configurations.isBlank(), "the build script configures the plain test task");
-        for (String coupling : RELEASE_COUPLING) {
+        for (String coupling : FORBIDDEN_IN_PLAIN_TEST) {
             assertFalse(
-                    configurations.contains(coupling),
+                    containsIdentifier(configurations, coupling),
                     "the plain test task must not reference " + coupling
                             + ": a focused test run must not need the native image, a Maven-local publication,"
                             + " or a release archive");
@@ -57,13 +83,13 @@ final class TestTaskIndependenceTest {
 
     @Test
     void releaseArchiveVerificationOwnsItsTaskAndCheckStillRunsIt() throws IOException {
-        String build = Files.readString(BUILD_SCRIPT, StandardCharsets.UTF_8);
+        String build = stripComments(Files.readString(BUILD_SCRIPT, StandardCharsets.UTF_8));
 
-        String task = everyConfigurationBlock(build, RELEASE_TASK);
+        String task = everyConfigurationBlock(build, List.of(RELEASE_TASK_OPENER));
         assertTrue(!task.isBlank(), "the release-archive verification runs in its own test task");
-        for (String coupling : RELEASE_COUPLING) {
+        for (String coupling : REQUIRED_IN_RELEASE_TASK) {
             assertTrue(
-                    task.contains(coupling),
+                    containsIdentifier(task, coupling),
                     "the release-archive task must reference " + coupling
                             + ": it consumes the packaged artifacts the checksum task produces");
         }
@@ -76,40 +102,163 @@ final class TestTaskIndependenceTest {
         assertTrue(
                 Files.isRegularFile(VERIFICATION_SOURCE),
                 "the verification stays a member of the JVM test source set, where the contract index reaches it");
-        String check = everyConfigurationBlock(build, "tasks.named(\"check\")");
+        String check = everyConfigurationBlock(build, CHECK_TASK_OPENERS);
         assertTrue(
-                check.contains("releaseArchiveTest"), "the check task still runs the release-archive verification");
+                containsIdentifier(check, "releaseArchiveTest"),
+                "the check task still runs the release-archive verification");
+    }
+
+    @Test
+    void scannerHandlesBracesInsideCommentsAndStringsAndAlternateGradleDslForms() {
+        String synthetic = """
+                // comment with unmatched brace {
+                tasks.test {
+                  val note = "string with unmatched closing brace }"
+                  /* block comment with { nested /* { */ } braces */
+                  dependsOn("nativeCompile")
+                }
+                tasks.withType<Test>().configureEach {
+                  val raw = \"\"\"triple string with } and {\"\"\"
+                  dependsOn(tasks.named("sha256Sums"))
+                }
+                """;
+        String stripped = stripComments(synthetic);
+        String blocks = everyConfigurationBlock(stripped, PLAIN_TEST_OPENERS);
+
+        assertTrue(containsIdentifier(blocks, "nativeCompile"), "alternate tasks.test DSL block must be inspected");
+        assertTrue(containsIdentifier(blocks, "sha256Sums"), "shared tasks.withType<Test> block must be inspected");
+        assertFalse(
+                containsIdentifier("excludeTestsMatching(releaseArchiveVerification)", "releaseArchive"),
+                "identifier matching must not false-match releaseArchiveVerification");
     }
 
     /**
      * Every brace-balanced configuration block the build script opens with {@code opener},
-     * joined; a build script may configure one task in several places.
+     * joined; comments are stripped and string literals are skipped so braces inside either
+     * never skew matching.
      */
     static String everyConfigurationBlock(String build, String opener) {
-        StringBuilder joined = new StringBuilder();
-        int from = 0;
-        while (true) {
-            int start = build.indexOf(opener, from);
-            if (start < 0) {
-                return joined.toString();
-            }
-            int end = blockEnd(build, start);
-            joined.append(build, start, end).append('\n');
-            from = end;
-        }
+        return everyConfigurationBlock(
+                stripComments(build), List.of(Pattern.compile(Pattern.quote(opener) + "\\s*\\{")));
     }
 
-    /** The index just past the brace that closes the block opening at {@code start}. */
-    private static int blockEnd(String build, int start) {
-        int depth = 0;
-        for (int index = build.indexOf('{', start); index < build.length(); index++) {
-            char current = build.charAt(index);
-            if (current == '{') {
-                depth++;
-            } else if (current == '}' && --depth == 0) {
-                return index + 1;
+    /**
+     * Every brace-balanced configuration block opened by any pattern in {@code openers}, joined;
+     * a build script may configure one task across multiple blocks and DSL spellings.
+     */
+    private static String everyConfigurationBlock(String build, List<Pattern> openers) {
+        StringBuilder joined = new StringBuilder();
+        for (Pattern opener : openers) {
+            Matcher matcher = opener.matcher(build);
+            int from = 0;
+            while (matcher.find(from)) {
+                int openBrace = matcher.end() - 1;
+                int end = blockEnd(build, openBrace);
+                joined.append(build, matcher.start(), end).append('\n');
+                from = end;
             }
         }
-        throw new IllegalStateException("the build script opens a block it never closes at index " + start);
+        return joined.toString();
+    }
+
+    /**
+     * Strips Kotlin line and nested block comments while leaving string and character literals
+     * intact, so braces or task names inside comments never skew matching.
+     */
+    private static String stripComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int index = 0;
+        int length = source.length();
+        while (index < length) {
+            char current = source.charAt(index);
+            if (current == '/' && index + 1 < length && source.charAt(index + 1) == '/') {
+                index += 2;
+                while (index < length && source.charAt(index) != '\n') {
+                    index++;
+                }
+            } else if (current == '/' && index + 1 < length && source.charAt(index + 1) == '*') {
+                int depth = 1;
+                index += 2;
+                while (index < length && depth > 0) {
+                    if (source.charAt(index) == '/' && index + 1 < length && source.charAt(index + 1) == '*') {
+                        depth++;
+                        index += 2;
+                    } else if (source.charAt(index) == '*' && index + 1 < length && source.charAt(index + 1) == '/') {
+                        depth--;
+                        index += 2;
+                    } else {
+                        if (source.charAt(index) == '\n') {
+                            out.append('\n');
+                        }
+                        index++;
+                    }
+                }
+            } else if (current == '"' && index + 2 < length && source.charAt(index + 1) == '"'
+                    && source.charAt(index + 2) == '"') {
+                int end = source.indexOf("\"\"\"", index + 3);
+                int stop = end < 0 ? length : end + 3;
+                out.append(source, index, stop);
+                index = stop;
+            } else if (current == '"' || current == '\'') {
+                int stop = quotedLiteralEnd(source, index, current);
+                out.append(source, index, stop);
+                index = stop;
+            } else {
+                out.append(current);
+                index++;
+            }
+        }
+        return out.toString();
+    }
+
+    /** The index just past the brace closing {@code openBrace}, skipping Kotlin string literals. */
+    private static int blockEnd(String build, int openBrace) {
+        int depth = 0;
+        int index = openBrace;
+        int length = build.length();
+        while (index < length) {
+            char current = build.charAt(index);
+            if (current == '"' && index + 2 < length && build.charAt(index + 1) == '"'
+                    && build.charAt(index + 2) == '"') {
+                int end = build.indexOf("\"\"\"", index + 3);
+                index = end < 0 ? length : end + 3;
+            } else if (current == '"' || current == '\'') {
+                index = quotedLiteralEnd(build, index, current);
+            } else if (current == '{') {
+                depth++;
+                index++;
+            } else if (current == '}') {
+                index++;
+                if (--depth == 0) {
+                    return index;
+                }
+            } else {
+                index++;
+            }
+        }
+        throw new IllegalStateException("the build script opens a block it never closes at index " + openBrace);
+    }
+
+    /** The index just past a single- or double-quoted Kotlin literal starting at {@code start}. */
+    private static int quotedLiteralEnd(String source, int start, char quote) {
+        int index = start + 1;
+        while (index < source.length()) {
+            char current = source.charAt(index);
+            if (current == '\\') {
+                index += 2;
+            } else if (current == quote) {
+                return index + 1;
+            } else {
+                index++;
+            }
+        }
+        return source.length();
+    }
+
+    /** Matches {@code token} at identifier boundaries (supporting dotted property keys as well). */
+    private static boolean containsIdentifier(String text, String token) {
+        return Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(token) + "(?![A-Za-z0-9_])")
+                .matcher(text)
+                .find();
     }
 }

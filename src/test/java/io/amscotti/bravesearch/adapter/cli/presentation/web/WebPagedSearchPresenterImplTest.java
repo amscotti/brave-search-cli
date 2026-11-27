@@ -2,6 +2,7 @@ package io.amscotti.bravesearch.adapter.cli.presentation.web;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.amscotti.bravesearch.adapter.cli.presentation.OutputStreamResultWriter;
@@ -372,6 +373,48 @@ final class WebPagedSearchPresenterImplTest {
         assertTrue(jsonl.stdoutText().contains("\"type\":\"error\""), jsonl.stdoutText());
         assertTrue(jsonl.stdoutText().contains("\"MALFORMED_RESPONSE\""), jsonl.stdoutText());
         assertTrue(jsonl.stdoutText().contains("\"requested_pages\":3"), "the counted framing is kept: " + jsonl.stdoutText());
+    }
+
+    @Test
+    void aRefusedPacingWaitKeepsItsTimingDiagnosticAndObservedWindowsAcrossModes() {
+        String refusal =
+                "the rate-limit window resets in 2592000s, beyond this walk's maximum wait of 60s; retry after the reset";
+        RateLimitSnapshot monthly = snapshotOf(new RateLimitWindow("month", 2000, 0, Duration.ofSeconds(2592000)));
+        PaginationService.PagedRun<WebSearchResult> refused = new PaginationService.PagedRun<>(
+                3,
+                List.of(new PagedSearch.Page<>(0, 1, null, resultOf(200, PAGE_ONE_BODY, monthly, "req-1", null))),
+                new Outcome.Failure<>(FailureKind.RATE_LIMITED, refusal, null, monthly, 0));
+
+        Rendered human = render(refused, REQUEST, human(false));
+        assertEquals(5, human.exit());
+        assertEquals("", human.stdoutText());
+        assertEquals(List.of("web: " + refusal + " (1 of 3 requested pages completed)"), human.stderr());
+        assertFalse(human.stderr().getFirst().contains("retry after a short wait"), human.stderr().toString());
+
+        Rendered json = render(refused, REQUEST, machine(OutputMode.JSON, false));
+        assertEquals(5, json.exit());
+        assertEquals(List.of("web: " + refusal + " (1 of 3 requested pages completed)"), json.stderr());
+        assertTrue(json.stdoutText().contains("\"code\":\"RATE_LIMITED\""), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"policy\":\"month\""), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"reset_ms\":2592000000"), json.stdoutText());
+        assertTrue(
+                schemas.validate("envelope-error.schema.json", json.stdout()).isEmpty(),
+                "the refused-wait failure envelope satisfies the published error schema: " + json.stdoutText());
+
+        Rendered jsonl = render(refused, REQUEST, machine(OutputMode.JSONL, false));
+        assertEquals(5, jsonl.exit());
+        assertEquals(List.of(), jsonl.stderr(), "jsonl owns its failure explanation on stdout");
+        String[] lines = jsonl.stdoutText().stripTrailing().split("\n");
+        String errorLine = lines[lines.length - 1];
+        assertTrue(errorLine.contains("\"type\":\"error\""), errorLine);
+        assertTrue(errorLine.contains("\"code\":\"RATE_LIMITED\""), errorLine);
+        assertTrue(errorLine.contains("\"policy\":\"month\""), errorLine);
+        assertTrue(errorLine.contains("\"reset_ms\":2592000000"), errorLine);
+        for (String line : lines) {
+            assertTrue(
+                    schemas.validateText("jsonl-record.schema.json", line).isEmpty(),
+                    "every jsonl record satisfies the published schema: " + line);
+        }
     }
 
     private record Rendered(int exit, byte[] stdout, List<String> stderr) {

@@ -283,12 +283,72 @@ final class PaginationServiceTest {
 
         assertFalse(run.succeeded());
         assertEquals(FailureKind.RATE_LIMITED, run.failure().kind(), "a refused wait is a rate-limit verdict");
+        assertEquals(0, run.failure().httpStatus(), "a local pacing refusal carries no upstream failing status");
+        assertSame(
+                monthExhausted,
+                run.failure().rateLimits(),
+                "the triggering rate-limit snapshot rides the refused wait failure");
         assertTrue(
                 run.failure().diagnostic().contains("2505600s"),
                 "the diagnostic names the outstanding wait in seconds: " + run.failure().diagnostic());
         assertEquals(1, run.receivedPages(), "the pages completed before the refused wait are preserved");
         assertTrue(waiter.resetDeadlines.isEmpty(), "none of the over-long wait is performed");
         assertEquals(List.of(1), fetcher.requestedPages(), "no request follows a refused wait");
+    }
+
+    @Test
+    void aFractionalOverflowBeyondTheMaximumWaitRoundsUpInsteadOfPrintingEqualSeconds() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted =
+                snapshotOf(observedAt, new RateLimitWindow("minute", 60, 0, Duration.ofSeconds(61)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(
+                1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ZERO, Duration.ofMillis(60_500));
+
+        PaginationService.PagedRun<WebSearchResult> run = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, waiter, Duration.ofSeconds(60))
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {});
+
+        assertFalse(run.succeeded());
+        assertEquals(FailureKind.RATE_LIMITED, run.failure().kind());
+        assertEquals(
+                "the rate-limit window resets in 61s, beyond this walk's maximum wait of 60s; retry after the reset",
+                run.failure().diagnostic());
+
+        RecordingWaiter subSecondWaiter = new RecordingWaiter(Duration.ZERO, Duration.ofMillis(500));
+        PaginationService.PagedRun<WebSearchResult> zeroCapRun = new PaginationService<WebSearchResult>(
+                        PaginationServiceTest::webContinuation, subSecondWaiter, Duration.ZERO)
+                .fetchAll(fetcher, 2, neverCancelled(), ignored -> {});
+
+        assertEquals(
+                "the rate-limit window resets in 1s, beyond this walk's maximum wait of 0s; retry after the reset",
+                zeroCapRun.failure().diagnostic());
+    }
+
+    @Test
+    void aSubMillisecondOutstandingWaitIsNeverAnnouncedAsZeroSeconds() {
+        Instant observedAt = Instant.ofEpochSecond(1_700_000_000);
+        RateLimitSnapshot exhausted =
+                snapshotOf(observedAt, new RateLimitWindow("request", 1, 0, Duration.ofSeconds(1)));
+        RecordingFetcher fetcher = new RecordingFetcher();
+        fetcher.respond(
+                1, new Outcome.Success<>(resultWithBody(200, "{\"query\":{\"more_results_available\":true}}", exhausted)));
+        fetcher.respond(2, successWithBody("{\"query\":{\"more_results_available\":false}}"));
+        List<String> heard = new ArrayList<>();
+        RecordingWaiter waiter = new RecordingWaiter(Duration.ZERO, Duration.ofNanos(500_000));
+
+        PaginationService.PagedRun<WebSearchResult> run =
+                new PaginationService<WebSearchResult>(PaginationServiceTest::webContinuation, waiter)
+                        .fetchAll(
+                                fetcher,
+                                2,
+                                neverCancelled(),
+                                ignored -> {},
+                                (page, outstanding) -> heard.add(page + ":" + outstanding));
+
+        assertTrue(run.succeeded());
+        assertTrue(heard.isEmpty(), "sub-millisecond remainders must not announce a zero-second wait: " + heard);
     }
 
     @Test

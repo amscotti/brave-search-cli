@@ -65,7 +65,7 @@ MODE-COMPAT-RAW-SINGLE:
   test: io.amscotti.bravesearch.adapter.cli.option.OutputModeCompatibilityTest#rawIsRejectedForMultiRequestOperations
 PARSE-BEFORE-RENDER:
   doc: docs/cli-contract.md#parse-before-render
-  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#usageFailureHappensBeforeAnyNetworkDispatch
+  test: io.amscotti.bravesearch.adapter.cli.command.web.WebSearchProcessTest#usageFailureWithOutputFlagHappensBeforeRenderingOrDispatch
 WARNINGS-ROUTING:
   doc: docs/cli-contract.md#warning-routing
   test: io.amscotti.bravesearch.adapter.cli.presentation.ModeAwareWarningsTest#warningsRouteToTheChannelTheirModeOwns

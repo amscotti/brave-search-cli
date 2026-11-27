@@ -1,8 +1,10 @@
 package io.amscotti.bravesearch.application.stream;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -19,7 +21,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class CancellationContext {
 
     /** Why the run terminated; the CLI exit table derives the process status from the cause. */
-    public enum Cause {        /** The user interrupted the process; conventional shell signal exit status. */
+    public enum Cause {
+        /** The user interrupted the process; conventional shell signal exit status. */
         SIGINT,
         /** The user terminated the process; conventional shell signal exit status. */
         SIGTERM,
@@ -77,6 +80,35 @@ public final class CancellationContext {
         released.await();
     }
 
+    /**
+     * Waits up to {@code timeout} for the first latch, or until the waiting thread is
+     * interrupted. A zero or negative timeout observes the latch immediately without parking.
+     *
+     * @return {@code true} when a cause latched before {@code timeout} elapsed, {@code false}
+     *     when the wait elapsed without a latch
+     * @throws InterruptedException when the waiting thread is interrupted before the wait ends;
+     *     the interrupt status is cleared, as every checked wait leaves it
+     * @throws NullPointerException when {@code timeout} is null
+     */
+    public boolean await(Duration timeout) throws InterruptedException {
+        Objects.requireNonNull(timeout, "timeout");
+        if (timeout.isZero() || timeout.isNegative()) {
+            return cancelled();
+        }
+        long nanos;
+        try {
+            nanos = timeout.toNanos();
+        } catch (ArithmeticException overflow) {
+            nanos = Long.MAX_VALUE;
+        }
+        return released.await(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * Waits until the first latch; never throws. An interrupt while waiting leaves the wait in
+     * place and the thread's interrupt flag is still set on return, so callers do not lose the
+     * signal.
+     */
     public void awaitUninterruptibly() {
         boolean interrupted = false;
         while (released.getCount() > 0) {

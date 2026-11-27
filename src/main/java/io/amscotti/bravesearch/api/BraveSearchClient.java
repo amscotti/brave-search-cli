@@ -340,7 +340,16 @@ public final class BraveSearchClient implements AutoCloseable {
         if (closed.get()) {
             return new Outcome.Failure<>(FailureKind.TRANSPORT, "the client is closed");
         }
-        return call.get();
+        Outcome<Response> outcome = call.get();
+        if (closed.get()
+                && outcome instanceof Outcome.Failure<Response> failure
+                && failure.kind() == FailureKind.INTERNAL
+                && "the HTTP client has been closed".equals(failure.diagnostic())) {
+            // close() raced between the open check above and transport dispatch: surface the
+            // documented closed-client transport outcome rather than the transport's internal code
+            return new Outcome.Failure<>(FailureKind.TRANSPORT, "the client is closed");
+        }
+        return outcome;
     }
 
     private static void requireKind(PlaceEnrichmentRequest request, PlaceEnrichmentRequest.Kind kind, String method) {

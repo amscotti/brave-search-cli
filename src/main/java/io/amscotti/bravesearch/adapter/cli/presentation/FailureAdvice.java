@@ -48,7 +48,11 @@ final class FailureAdvice {
         Objects.requireNonNull(failure, "failure");
         return switch (failure.kind()) {
             case AUTHENTICATION -> authentication(failure);
-            case RATE_LIMITED -> withObservation("the Brave API rate limit was reached", failure) + "; " + retryAdvice(failure);
+            // a statusless rate limit is a local walk refusal (for example, a reset beyond
+            // the walk's pacing cap), whose own diagnostic already names the wait and remedy
+            case RATE_LIMITED -> failure.httpStatus() == 0
+                    ? failure.diagnostic()
+                    : withObservation("the Brave API rate limit was reached", failure) + "; " + retryAdvice(failure);
             case UPSTREAM -> OPTION_NOT_IN_PLAN.equals(normalizedCode(failure))
                     ? withObservation("the API key's plan does not include this endpoint", failure)
                     : failure.diagnostic();
@@ -81,12 +85,11 @@ final class FailureAdvice {
                 }
             }
         }
-        if (longest.isZero()) {
+        long millis = longest.toMillis();
+        if (millis == 0) {
             return "retry after a short wait";
         }
-        long seconds = longest.getSeconds();
-        long millis = longest.toMillis();
-        return "retry after " + (longest.getNano() == 0 ? seconds + "s" : millis + " ms");
+        return "retry after " + (millis % 1000 == 0 ? millis / 1000 + "s" : millis + " ms");
     }
 
     /** The observed facts a reader can act on: the status, and the upstream code when it is safe to show. */

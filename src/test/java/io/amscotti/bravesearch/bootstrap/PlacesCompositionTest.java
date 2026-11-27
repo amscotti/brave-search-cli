@@ -42,7 +42,7 @@ final class PlacesCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        PlacesComposition process = PlacesComposition.process(storedCredentials(), environment);
+        PlacesComposition process = PlacesComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "places", "search", "--base-url", "http://127.0.0.1:1", "coffee");
 
@@ -83,7 +83,11 @@ final class PlacesCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(exchanges, config, Compositions.process(storedCredentials(), environment, exchanges).withPlacesSearch(placesSearch))
+            int exitCode = new Main(
+                            exchanges,
+                            config,
+                            Compositions.process(environment, exchanges).withPlacesSearch(placesSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

@@ -232,6 +232,37 @@ final class BoundedBodyHandlerTest {
         assertTrue(stream.closedAfterBreach(), "the stream is still closed, cancelling the subscription");
     }
 
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void anAlreadyLatchedCancellationEndsAnEmptyStreamWithoutRequiringAClock() {
+        CancellationContext cancelled = new CancellationContext();
+        cancelled.latch(CancellationContext.Cause.SIGINT);
+        RecordingStream empty = new RecordingStream(new byte[0]);
+
+        assertThrows(
+                ExchangeCancelledException.class,
+                () -> BoundedBodyHandler.readBounded(empty, 1024, "response exceeds decoded limit", null, null, cancelled));
+        assertTrue(empty.closedAfterBreach(), "the stream is closed even when cancellation predates read");
+
+        RecordingStream previewBody = new RecordingStream(bytes(32));
+        byte[] preview = BoundedBodyHandler.preview(previewBody, 32, null, null, cancelled);
+        assertEquals(0, preview.length, "an already-cancelled preview reads nothing and needs no clock");
+        assertTrue(previewBody.closedAfterBreach());
+    }
+
+    @Test
+    @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void anAlreadyExpiredDeadlineEndsAnEmptyStreamBeforeReading() {
+        Clock arrived = Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC);
+        RecordingStream empty = new RecordingStream(new byte[0]);
+
+        assertThrows(
+                TotalDeadlineExceededException.class,
+                () -> BoundedBodyHandler.readBounded(
+                        empty, 1024, "response exceeds decoded limit", arrived, Instant.parse("2026-09-02T00:00:00Z")));
+        assertTrue(empty.closedAfterBreach());
+    }
+
     private static byte[] bytes(int count) {
         byte[] filled = new byte[count];
         for (int i = 0; i < count; i++) {

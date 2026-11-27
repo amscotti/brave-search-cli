@@ -96,8 +96,7 @@ final class WebSearchMainTest {
     @Test
     void theProcessCompositionResolvesTheLoopbackTestKeyBeforeAnyLoopbackExchange() {
         Map<String, String> emptyEnvironment = new HashMap<>();
-        WebSearchComposition withoutKey =
-                WebSearchComposition.process(configCompositionCredentials(), emptyEnvironment::get);
+        WebSearchComposition withoutKey = WebSearchComposition.process(emptyEnvironment::get);
 
         RunResult missing = runMain(withoutKey, "web", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -106,8 +105,7 @@ final class WebSearchMainTest {
 
         Map<String, String> keyedEnvironment = new HashMap<>();
         keyedEnvironment.put("BRAVE_SEARCH_TEST_KEY", "proxy-placeholder-token");
-        WebSearchComposition withKey =
-                WebSearchComposition.process(configCompositionCredentials(), keyedEnvironment::get);
+        WebSearchComposition withKey = WebSearchComposition.process(keyedEnvironment::get);
 
         RunResult refused = runMain(withKey, "web", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -133,7 +131,7 @@ final class WebSearchMainTest {
     }
 
     private WebSearchComposition webSearch(RemoteExchange<WebSearchRequest, WebSearchResult> exchange, WebSearchPresenter presenter) {
-        WebSearchComposition process = WebSearchComposition.process(configCompositionCredentials());
+        WebSearchComposition process = WebSearchComposition.process(name -> null);
         return new WebSearchComposition(
                 failingCredentials("BRAVE_SEARCH_TEST_KEY"), exchange, presenter, process.pagination(), process.pagedPresenter());
     }
@@ -171,7 +169,12 @@ final class WebSearchMainTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webSearch)).execute(args);
+            int exitCode = new Main(
+                            new ExchangeRegistry(),
+                            config,
+                            Compositions.process(name -> null, new ExchangeRegistry()).withWebSearch(webSearch),
+                            name -> null)
+                    .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {
             System.setOut(originalOut);

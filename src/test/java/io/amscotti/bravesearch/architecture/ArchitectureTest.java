@@ -374,12 +374,21 @@ final class ArchitectureTest {
                 () -> "a package that merely extends the adapter prefix's spelling is not an adapter:\n"
                         + siblingWiring.getFailureReport());
 
-        EvaluationResult selfConstruction = RULE_4_COMPOSITION_ROOTS.evaluate(
-                new ClassFileImporter().importClasses(SelfChainingAdapter.class));
+        JavaClasses selfWired =
+                new ClassFileImporter().importClasses(SelfChainingAdapter.class, SelfChainingAdapter.Builder.class);
+        EvaluationResult selfConstruction = RULE_4_COMPOSITION_ROOTS.evaluate(selfWired);
         assertFalse(
                 selfConstruction.hasViolation(),
-                () -> "constructor chaining is a type's own implementation, not composition from outside:\n"
+                () -> "constructor chaining and nested-builder construction are a type's own implementation, not"
+                        + " composition from outside:\n"
                         + selfConstruction.getFailureReport());
+
+        List<String> selfReferences = adapterConstructorReferencesOutsideCompositionRoots(selfWired);
+        assertTrue(
+                selfReferences.isEmpty(),
+                () -> "a self-referential constructor reference is a type's own implementation, not composition from"
+                        + " outside:\n"
+                        + selfReferences);
     }
 
     @Test

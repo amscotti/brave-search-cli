@@ -120,10 +120,10 @@ abstract class PlaceEnrichmentCommandSupport
             DiagnosticsSink diagnostics) {
         CancellationContext cancellation = new CancellationContext();
         Runnable detach = cancellations().register(cancellation);
-        try (RemoteWalk<PlaceEnrichmentRequest, PlaceEnrichmentResult> walk =
-                exchange().openWalk(dispatchOf(request, credential, cancellation))) {
+        try {
             PaginationService.PagedRun<PlaceEnrichmentResult> run;
-            try {
+            try (RemoteWalk<PlaceEnrichmentRequest, PlaceEnrichmentResult> walk =
+                    exchange().openWalk(dispatchOf(request, credential, cancellation))) {
                 run = pagination.fetchAll(
                         chunk -> walk.dispatch(chunkOf(request, chunk)),
                         request.chunkCount(),
@@ -133,12 +133,7 @@ abstract class PlaceEnrichmentCommandSupport
             } catch (UncheckedIOException writeFailure) {
                 return WalkExitPolicy.exitForWalkWriteFailure(writeFailure, cancellation, diagnostics, commandName());
             }
-            int presented;
-            try {
-                presented = presenter.present(run, request, output, results, diagnostics);
-            } catch (UncheckedIOException writeFailure) {
-                return WalkExitPolicy.exitForWalkWriteFailure(writeFailure, cancellation, diagnostics, commandName());
-            }
+            int presented = presenter.present(run, request, output, results, diagnostics);
             Optional<Integer> signalExit = WalkExitPolicy.latchedSignalExit(run, cancellation);
             if (signalExit.isPresent()) {
                 // the latch is authoritative: the mode rendered its transport-failure document

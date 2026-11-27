@@ -42,7 +42,7 @@ final class SuggestCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        SuggestComposition process = SuggestComposition.process(storedCredentials(), environment);
+        SuggestComposition process = SuggestComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "suggest", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -83,7 +83,11 @@ final class SuggestCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(exchanges, config, Compositions.process(storedCredentials(), environment, exchanges).withSuggestSearch(suggestSearch))
+            int exitCode = new Main(
+                            exchanges,
+                            config,
+                            Compositions.process(environment, exchanges).withSuggestSearch(suggestSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

@@ -139,4 +139,125 @@ final class ProxyEnvironmentTest {
                 "the proxy variables, in precedence order");
         assertEquals(List.of("NO_PROXY", "no_proxy"), ProxyEnvironment.BYPASS_VARIABLES);
     }
+
+    @Test
+    void aBlankUppercaseProxyVariableOverridesLowercaseAndForcesDirectConnection() {
+        List<String> asked = new java.util.ArrayList<>();
+        Optional<HttpProxy> emptyUpper = ProxyEnvironment.httpsProxy(name -> {
+            asked.add(name);
+            return switch (name) {
+                case "HTTPS_PROXY" -> "";
+                case "https_proxy" -> "http://lower.internal:8080";
+                default -> null;
+            };
+        });
+        Optional<HttpProxy> blankUpper = ProxyEnvironment.httpsProxy(name -> switch (name) {
+            case "HTTPS_PROXY" -> "   ";
+            case "https_proxy" -> "http://lower.internal:8080";
+            default -> null;
+        });
+
+        assertEquals(Optional.empty(), emptyUpper, "an explicit empty HTTPS_PROXY disables https_proxy");
+        assertEquals(Optional.empty(), blankUpper, "an explicit blank HTTPS_PROXY disables https_proxy");
+        assertEquals(List.of("HTTPS_PROXY"), asked, "present HTTPS_PROXY stops the lookup without consulting https_proxy");
+    }
+
+    @Test
+    void aBlankUppercaseNoProxyOverridesLowercaseAndClearsTheBypassList() {
+        List<String> asked = new java.util.ArrayList<>();
+        Optional<HttpProxy> proxy = ProxyEnvironment.httpsProxy(name -> {
+            asked.add(name);
+            return switch (name) {
+                case "HTTPS_PROXY" -> "http://proxy.internal:3128";
+                case "NO_PROXY" -> "   ";
+                case "no_proxy" -> "*";
+                default -> null;
+            };
+        });
+
+        assertEquals(List.of(), proxy.orElseThrow().bypass(), "an explicit blank NO_PROXY clears no_proxy");
+        assertEquals(
+                List.of("HTTPS_PROXY", "NO_PROXY"),
+                asked,
+                "present NO_PROXY stops the lookup without consulting no_proxy");
+    }
+
+    @Test
+    void aTrailingSlashAndIpv6ProxyLiteralsAreAccepted() {
+        assertEquals(
+                new HttpProxy("proxy.internal", 3128, List.of()),
+                ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? "http://proxy.internal:3128/" : null)
+                        .orElseThrow());
+        assertEquals(
+                new HttpProxy("[::1]", 3128, List.of()),
+                ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? "http://[::1]:3128" : null)
+                        .orElseThrow());
+        assertEquals(
+                new HttpProxy("[2001:db8::1]", 8080, List.of()),
+                ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? "[2001:db8::1]:8080" : null)
+                        .orElseThrow());
+    }
+
+    @Test
+    void pathsQueriesFragmentsAndCredentialsContainingDelimitersAreRefusedWithoutLeaking() {
+        List<String> pathInputs = List.of(
+                "http://proxy.internal/proxy.pac",
+                "http://proxy.internal:3128/v1/proxy",
+                "http://proxy.internal:3128//",
+                "http:///proxy.pac",
+                "http://sentinel-secret/rest@proxy.internal:3128",
+                "http://sentinel-user:8080/sentinel-pass@proxy.internal:3128");
+        for (String input : pathInputs) {
+            LocalConfigException failure = assertThrows(
+                    LocalConfigException.class,
+                    () -> ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? input : null),
+                    () -> "refused: " + input);
+            assertEquals(LocalConfigException.Reason.MISCONFIGURED_PROXY, failure.reason());
+            assertEquals("local configuration error: the proxy address must not carry a path", failure.getMessage());
+            assertFalse(failure.getMessage().contains("sentinel"), failure.getMessage());
+            assertFalse(failure.getMessage().contains("proxy.internal"), failure.getMessage());
+        }
+
+        List<String> queryOrFragmentInputs = List.of(
+                "http://proxy.internal:3128?token=sentinel-secret",
+                "http://proxy.internal:3128#sentinel-secret",
+                "http://proxy.internal/?",
+                "http://proxy.internal/#",
+                "http://sentinel-secret?rest@proxy.internal:3128",
+                "http://sentinel-secret#rest@proxy.internal:3128",
+                "http://sentinel-user:8080?sentinel-pass@proxy.internal:3128",
+                "http://sentinel-user:8080#sentinel-pass@proxy.internal:3128");
+        for (String input : queryOrFragmentInputs) {
+            LocalConfigException failure = assertThrows(
+                    LocalConfigException.class,
+                    () -> ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? input : null),
+                    () -> "refused: " + input);
+            assertEquals(LocalConfigException.Reason.MISCONFIGURED_PROXY, failure.reason());
+            assertEquals(
+                    "local configuration error: the proxy address must not carry a query or fragment",
+                    failure.getMessage());
+            assertFalse(failure.getMessage().contains("sentinel"), failure.getMessage());
+            assertFalse(failure.getMessage().contains("proxy.internal"), failure.getMessage());
+        }
+    }
+
+    @Test
+    void trailingEmptyPortsAndRegistryBasedUserInfoAreRefusedWithoutLeaking() {
+        for (String emptyPort : List.of("http://proxy.internal:", "proxy.internal:", "http://[::1]:")) {
+            assertEquals(
+                    "local configuration error: the proxy port is outside 1 through 65535",
+                    refused(emptyPort),
+                    () -> "empty port refused: " + emptyPort);
+        }
+        for (String withAt : List.of(
+                "http://sentinel-user:sentinel-pass@proxy_internal:3128",
+                "http://sentinel-user:p@ss@proxy.internal:3128")) {
+            LocalConfigException failure = assertThrows(
+                    LocalConfigException.class,
+                    () -> ProxyEnvironment.httpsProxy(name -> name.equals("HTTPS_PROXY") ? withAt : null));
+            assertEquals(LocalConfigException.Reason.MISCONFIGURED_PROXY, failure.reason());
+            assertEquals("local configuration error: an authenticated proxy is not supported", failure.getMessage());
+            assertFalse(failure.getMessage().contains("sentinel"), failure.getMessage());
+        }
+    }
 }

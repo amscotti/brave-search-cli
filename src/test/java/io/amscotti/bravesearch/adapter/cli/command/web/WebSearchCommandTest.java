@@ -320,6 +320,33 @@ final class WebSearchCommandTest {
         assertEquals(announcement, verbose.stderr(), "--verbose carries the announcement into a machine mode");
     }
 
+    @Test
+    void aSubMillisecondPacingWaitStaysSilent() {
+        PaginationService.RateWaiter subMillisecond = new PaginationService.RateWaiter() {
+
+            @Override
+            public Duration outstandingUntil(Instant resetAt) {
+                return Duration.ofNanos(500_000);
+            }
+
+            @Override
+            public Duration await(Instant resetAt, CancellationContext cancellation) {
+                return Duration.ZERO;
+            }
+        };
+        Harness human = pacedHarness(subMillisecond);
+        Harness verboseJsonl = pacedHarness(subMillisecond);
+
+        Harness.RunResult heard = human.run("web", "--all-pages", "q");
+        Harness.RunResult verbose = verboseJsonl.run("web", "--all-pages", "--output", "jsonl", "--verbose", "q");
+
+        assertEquals(0, heard.exitCode(), () -> heard.describe());
+        assertEquals(2, human.exchange.dispatches.size());
+        assertEquals("", heard.stderr(), "a sub-millisecond wait never announces 'waiting 0s'");
+        assertEquals(0, verbose.exitCode(), () -> verbose.describe());
+        assertEquals("", verbose.stderr(), "verbose mode also skips a sub-millisecond wait");
+    }
+
     /** A walk whose first page reports an exhausted window, then a final page. */
     private static Harness pacedHarness(PaginationService.RateWaiter waiter) {
         Harness harness = new Harness();

@@ -405,6 +405,71 @@ final class SecureConfigStoreWriteTest {
     }
 
     @Test
+    void storeFailsClosedOnFirstWriteWhenTheHardLinkCountIsUnobservable() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        SecureConfigStore store = ConfigStoreHarness.storeWithHardLinkCounter(configPath, path -> -1L);
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, () -> store.store(credential("token-one")));
+
+        assertEquals(LocalConfigException.Reason.UNSAFE_FILESYSTEM, failure.reason());
+        assertFalse(Files.exists(configPath, LinkOption.NOFOLLOW_LINKS), "no config file may be installed on refusal");
+        assertEquals(
+                List.of(),
+                entryNames(ConfigStoreHarness.managedDirectory(fabricatedHome)),
+                "the temporary file must be discarded on refusal");
+    }
+
+    @Test
+    void storeRefusesAFirstWriteWhenTheTemporaryFileGainsAnExtraHardLink() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Path managedDirectory = ConfigStoreHarness.managedDirectory(fabricatedHome);
+        Path watchedEntry = ConfigStoreHarness.entryName(configPath);
+        SecureConfigStore store = ConfigStoreHarness.storeWithOpener(
+                configPath,
+                directory -> SecureConfigStore.SecureStreamOpener.processFilesystem()
+                        .open(directory)
+                        .map(real -> new DelegatingSecureStream(real) {
+                            @Override
+                            public <V extends FileAttributeView> V getFileAttributeView(
+                                    Path entry, Class<V> type, LinkOption... options) {
+                                if (!watchedEntry.equals(entry) && type == PosixFileAttributeView.class) {
+                                    addHardLinkBehindTheWrite(
+                                            managedDirectory.resolve(entry), managedDirectory.resolve("temp-link"));
+                                }
+                                return delegate.getFileAttributeView(entry, type, options);
+                            }
+                        }));
+
+        LocalConfigException failure = assertThrows(LocalConfigException.class, () -> store.store(credential("token-one")));
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertTrue(failure.getMessage().contains("hard links"), () -> failure.getMessage());
+        assertFalse(Files.exists(configPath, LinkOption.NOFOLLOW_LINKS), "no config file may be installed on refusal");
+        assertEquals(
+                List.of("temp-link"),
+                entryNames(managedDirectory),
+                "the temporary entry must be unlinked, leaving only the injected sibling");
+    }
+
+    @Test
+    void clearRefusesASymlinkedConfigFileAndLeavesTheTargetUntouched() throws IOException {
+        Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
+        Path decoy = fabricatedHome.resolve("decoy.json");
+        Files.writeString(decoy, "decoy-content", StandardCharsets.UTF_8);
+        Files.createDirectories(
+                ConfigStoreHarness.managedDirectory(fabricatedHome),
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        Files.createSymbolicLink(configPath, decoy);
+
+        LocalConfigException failure =
+                assertThrows(LocalConfigException.class, () -> ConfigStoreHarness.store(configPath).clear());
+
+        assertEquals(LocalConfigException.Reason.INSECURE_FILE, failure.reason());
+        assertEquals("decoy-content", ConfigStoreHarness.readContent(decoy));
+        assertTrue(Files.isSymbolicLink(configPath));
+    }
+
+    @Test
     void storeFailsClosedWhenAtomicReplacementIsUnsupported() throws IOException {
         Path configPath = ConfigStoreHarness.configPath(fabricatedHome);
         ConfigStoreHarness.writeValidConfig(configPath, "token-one");
@@ -525,6 +590,15 @@ final class SecureConfigStoreWriteTest {
     private static void loosenModeBehindTheWrite(Path file) {
         try {
             ConfigStoreHarness.chmod(file, "rw-r--r--");
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    /** Creates an extra hard link to the temporary file before pre-move revalidation runs. */
+    private static void addHardLinkBehindTheWrite(Path existing, Path link) {
+        try {
+            Files.createLink(link, existing);
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

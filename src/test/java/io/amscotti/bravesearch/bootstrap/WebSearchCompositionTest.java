@@ -39,15 +39,13 @@ final class WebSearchCompositionTest {
         Map<String, String> keyedEnvironment = Map.of(
                 "BRAVE_SEARCH_TEST_KEY",
                 "proxy-placeholder-token-" + java.util.UUID.randomUUID().toString().replace("-", ""));
-        WebSearchComposition process = WebSearchComposition.process(
-                storedCredentials(),
-                name -> {
-                    if ("BRAVE_SEARCH_TEST_KEY".equals(name)) {
-                        testKeyLookups.incrementAndGet();
-                        return keyedEnvironment.get(name);
-                    }
-                    return null;
-                });
+        WebSearchComposition process = WebSearchComposition.process(name -> {
+            if ("BRAVE_SEARCH_TEST_KEY".equals(name)) {
+                testKeyLookups.incrementAndGet();
+                return keyedEnvironment.get(name);
+            }
+            return null;
+        });
         WebSearchComposition composition = new WebSearchComposition(
                 process.loopbackTestToken(), process.exchange(), new TransportFailingPresenter(), process.pagination(), process.pagedPresenter());
 
@@ -92,7 +90,12 @@ final class WebSearchCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webSearch)).execute(args);
+            int exitCode = new Main(
+                            new ExchangeRegistry(),
+                            config,
+                            Compositions.process(name -> null, new ExchangeRegistry()).withWebSearch(webSearch),
+                            name -> null)
+                    .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {
             System.setOut(originalOut);

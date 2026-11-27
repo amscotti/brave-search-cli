@@ -13,7 +13,9 @@ import java.util.function.Function;
  * The standard proxy variables as the CLI reads them, through the injected environment
  * lookup: {@code HTTPS_PROXY} (or its lowercase spelling) names the proxy every remote
  * exchange travels through, and {@code NO_PROXY} (or {@code no_proxy}) names the origins
- * reached directly. An unset or blank proxy variable means a direct connection.
+ * reached directly. The uppercase spelling always takes precedence when present — even when
+ * blank, so an explicitly blank {@code HTTPS_PROXY} disables an inherited lowercase proxy and
+ * an explicitly blank {@code NO_PROXY} clears an inherited lowercase bypass list.
  *
  * <p>A value the client cannot honor is a configuration error that names the rule and never
  * the value, because a proxy address may carry credentials. The client tunnels through plain
@@ -40,17 +42,18 @@ public final class ProxyEnvironment {
      */
     public static Optional<HttpProxy> httpsProxy(Function<String, String> environmentLookup) {
         Objects.requireNonNull(environmentLookup, "environmentLookup");
-        String proxy = firstNonblank(PROXY_VARIABLES, environmentLookup);
-        if (proxy == null) {
+        String proxy = firstPresent(PROXY_VARIABLES, environmentLookup);
+        if (proxy == null || proxy.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(parse(proxy, firstNonblank(BYPASS_VARIABLES, environmentLookup)));
+        String bypass = firstPresent(BYPASS_VARIABLES, environmentLookup);
+        return Optional.of(parse(proxy, bypass == null || bypass.isBlank() ? null : bypass));
     }
 
-    private static String firstNonblank(List<String> names, Function<String, String> environmentLookup) {
+    private static String firstPresent(List<String> names, Function<String, String> environmentLookup) {
         for (String name : names) {
             String value = environmentLookup.apply(name);
-            if (value != null && !value.isBlank()) {
+            if (value != null) {
                 return value;
             }
         }
@@ -61,11 +64,22 @@ public final class ProxyEnvironment {
         String address = rawProxy.strip();
         String scheme = schemeOf(address);
         URI uri = parsed(address, scheme);
-        if (uri.getUserInfo() != null) {
+        String authority = uri.getRawAuthority();
+        if (authority != null && authority.indexOf('@') >= 0) {
             throw LocalConfigException.misconfiguredProxy("an authenticated proxy is not supported");
+        }
+        String rawPath = Objects.requireNonNullElse(uri.getRawPath(), "");
+        if (!rawPath.isEmpty() && !"/".equals(rawPath)) {
+            throw LocalConfigException.misconfiguredProxy("the proxy address must not carry a path");
+        }
+        if (uri.getRawQuery() != null || uri.getRawFragment() != null) {
+            throw LocalConfigException.misconfiguredProxy("the proxy address must not carry a query or fragment");
         }
         if (uri.getHost() == null) {
             throw LocalConfigException.misconfiguredProxy("the proxy address names no host");
+        }
+        if (uri.getPort() == -1 && authority.endsWith(":")) {
+            throw LocalConfigException.misconfiguredProxy("the proxy port is outside 1 through 65535");
         }
         int port = uri.getPort() == -1 ? HttpProxy.DEFAULT_PORT : uri.getPort();
         List<String> bypass = rawBypass == null

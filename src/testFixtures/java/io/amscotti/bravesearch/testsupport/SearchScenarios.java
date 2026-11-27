@@ -69,12 +69,17 @@ public abstract class SearchScenarios {
     /** The API version the fixture response reports through its header. */
     protected static final String RESPONSE_API_VERSION = "2026-08-30";
 
-    /** Inherited variables scrubbed from every child so ambient credentials cannot interfere. */
+    /** Inherited variables scrubbed from every child so ambient credentials, proxy, or debug settings cannot interfere. */
     protected static final Set<String> SCRUBBED =
             Set.of(
                     "BRAVE_API_KEY",
                     "BRAVE_SEARCH_API_KEY",
                     "BRAVE_SEARCH_TEST_KEY",
+                    "BRAVE_SEARCH_DEBUG",
+                    "HTTPS_PROXY",
+                    "https_proxy",
+                    "NO_PROXY",
+                    "no_proxy",
                     "XDG_CONFIG_HOME",
                     "JAVA_OPTS",
                     "NO_COLOR",

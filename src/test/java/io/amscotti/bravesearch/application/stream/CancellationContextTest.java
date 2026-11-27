@@ -3,8 +3,10 @@ package io.amscotti.bravesearch.application.stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -124,6 +126,61 @@ final class CancellationContextTest {
         assertTrue(context.cause().isEmpty(), "an interrupt latches nothing");
         // the latch still works afterwards: the interrupt retired one waiter, not the context
         assertTrue(context.latch(CancellationContext.Cause.SIGINT));
+    }
+
+    @Test
+    void timedAwaitReturnsFalseWhenElapsedAndTrueImmediatelyWhenLatched() throws InterruptedException {
+        CancellationContext context = new CancellationContext();
+        assertThrows(NullPointerException.class, () -> context.await(null));
+        assertFalse(context.await(Duration.ZERO), "zero timeout observes unlatched immediately");
+        assertFalse(context.await(Duration.ofMillis(-5)), "negative timeout observes unlatched immediately");
+        assertFalse(context.await(Duration.ofMillis(30)), "unlatched wait returns false after timeout");
+
+        CountDownLatch parked = new CountDownLatch(1);
+        AtomicBoolean observed = new AtomicBoolean(false);
+        Thread waiter = new Thread(() -> {
+            parked.countDown();
+            try {
+                observed.set(context.await(Duration.ofSeconds(30)));
+            } catch (InterruptedException unexpected) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        waiter.start();
+        assertTrue(parked.await(5, TimeUnit.SECONDS));
+
+        long startedAt = System.nanoTime();
+        context.latch(CancellationContext.Cause.SIGINT);
+        waiter.join(TimeUnit.SECONDS.toMillis(5));
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        assertFalse(waiter.isAlive(), "latch wakes timed await promptly");
+        assertTrue(elapsedMs < 2000, "woke promptly instead of waiting out 30s: " + elapsedMs + " ms");
+        assertTrue(observed.get(), "latched timed await returns true");
+        assertTrue(context.await(Duration.ZERO), "zero timeout observes latched immediately");
+    }
+
+    @Test
+    void timedAwaitPropagatesInterruptWithoutLatching() throws InterruptedException {
+        CancellationContext context = new CancellationContext();
+        CountDownLatch parked = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean(false);
+        Thread waiter = new Thread(() -> {
+            parked.countDown();
+            try {
+                context.await(Duration.ofSeconds(30));
+            } catch (InterruptedException expected) {
+                interrupted.set(true);
+            }
+        });
+        waiter.start();
+        assertTrue(parked.await(5, TimeUnit.SECONDS));
+        waiter.interrupt();
+        waiter.join(TimeUnit.SECONDS.toMillis(5));
+
+        assertFalse(waiter.isAlive());
+        assertTrue(interrupted.get());
+        assertFalse(context.cancelled());
     }
 
     @Test

@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.amscotti.bravesearch.adapter.bravehttp.BraveHttpTransport;
 import io.amscotti.bravesearch.adapter.bravehttp.endpoint.SuggestEndpoint;
 import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
+import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
+import io.amscotti.bravesearch.application.exchange.BraveHttpResponse;
 import io.amscotti.bravesearch.application.port.out.RemoteDispatch;
 import io.amscotti.bravesearch.application.port.out.RemoteExchange;
 import io.amscotti.bravesearch.application.port.out.RemoteWalk;
@@ -22,6 +25,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -158,6 +162,44 @@ final class RemoteExchangesTest {
         assertFalse(failure.getMessage().contains("proxy.invalid"), "the failure names the rule, never the address");
     }
 
+    @Test
+    void openWalkClosesTheTransportWhenGatewayConstructionFails() throws Exception {
+        AtomicReference<BraveHttpTransport> opened = new AtomicReference<>();
+        RemoteExchange<SuggestRequest, SuggestSearchResult> exchange = RemoteExchanges.blocking(
+                SuggestEndpoint::assemble,
+                SuggestSearchResult::new,
+                (connectTimeout, totalTimeout, cancellation) -> {
+                    // open a real transport with a positive header timeout so construction fails
+                    // inside BraveHttpBlockingGateway when it rejects the zero total timeout
+                    BraveHttpTransport transport =
+                            RemoteExchanges.DIRECT_TRANSPORTS.open(connectTimeout, BUDGET, cancellation);
+                    opened.set(transport);
+                    return transport;
+                });
+        RemoteDispatch<SuggestRequest> invalidTotalBudget = new RemoteDispatch<>(
+                SuggestRequest.builder("q").build(),
+                BraveApiOrigin.production(),
+                Credential.of("sentinel".getBytes(UTF_8)),
+                Duration.ZERO,
+                BUDGET,
+                null,
+                new CancellationContext());
+
+        assertThrows(IllegalArgumentException.class, () -> exchange.openWalk(invalidTotalBudget));
+
+        BraveApiRequest probe = SuggestEndpoint.assemble(
+                SuggestRequest.builder("after-close").build(),
+                BraveApiOrigin.production(),
+                Credential.of("sentinel".getBytes(UTF_8)),
+                null);
+        Outcome.Failure<BraveHttpResponse> closed = failureOf(opened.get().send(probe, BUDGET));
+        assertEquals(FailureKind.INTERNAL, closed.kind());
+        assertEquals(
+                "the HTTP client has been closed",
+                closed.diagnostic(),
+                "a transport opened before gateway construction fails must be closed immediately");
+    }
+
     /** The process exchange over an environment that routes everything through the stand-in. */
     private static RemoteExchange<SuggestRequest, SuggestSearchResult> proxiedExchange(ScriptedSseServer proxyStandIn) {
         return RemoteExchanges.blocking(
@@ -170,9 +212,9 @@ final class RemoteExchangesTest {
         return RemoteExchanges.blocking(
                 SuggestEndpoint::assemble,
                 SuggestSearchResult::new,
-                (connectTimeout, totalTimeout, cancellation, proxy) -> {
+                (connectTimeout, totalTimeout, cancellation) -> {
                     opened.incrementAndGet();
-                    return RemoteExchanges.DIRECT_TRANSPORTS.open(connectTimeout, totalTimeout, cancellation, proxy);
+                    return RemoteExchanges.DIRECT_TRANSPORTS.open(connectTimeout, totalTimeout, cancellation);
                 });
     }
 

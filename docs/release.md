@@ -60,8 +60,8 @@ and its scope is asserted by test.
 The Gradle-level proof of the release surface runs as part of `check` on every host with a
 supported release triple (macOS and Linux; the archive is cut for the host that builds it,
 so a host without a triple — the pinned toolchains include windows-x64 — fails the
-packaging itself, and its `test`/`check` fail with it because the verification below is
-wired into `test`):
+packaging itself when `releaseArchiveTest` or `check` runs, while the plain `test` task
+never touches the release chain):
 
 - `releaseArchive` packages the archive (native binary, docs, completions, skill, machine
   schemas, published JARs, SBOM);

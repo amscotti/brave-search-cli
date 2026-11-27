@@ -5,6 +5,8 @@ import io.amscotti.bravesearch.adapter.cli.option.OutputModeConverter;
 import io.amscotti.bravesearch.adapter.cli.presentation.DiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.ConfigShowRecordCodec;
+import io.amscotti.bravesearch.application.exchange.BraveApiRequest;
+import io.amscotti.bravesearch.application.exchange.InvalidTokenException;
 import io.amscotti.bravesearch.application.port.out.ConfigStore;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
 import io.amscotti.bravesearch.application.port.out.CredentialResolutionException;
@@ -100,6 +102,11 @@ public final class ShowCommand extends ConfigSubcommand implements Callable<Inte
 
     private ConfigShowView view() throws CredentialResolutionException {
         ResolvedCredential resolution = credentials.resolveWithProvenance();
+        try {
+            BraveApiRequest.requireWireableToken(resolution.credential());
+        } catch (InvalidTokenException unwirable) {
+            throw CredentialResolutionException.invalid(resolution.sourceName(), unwirable.getMessage());
+        }
         ConfigFileSight fileSight = sightTheFile();
         boolean fromEnvironment = !ConfigShowView.FILE_SOURCE.equals(resolution.sourceName());
         return new ConfigShowView(

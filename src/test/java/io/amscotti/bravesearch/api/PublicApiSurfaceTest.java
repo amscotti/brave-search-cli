@@ -15,6 +15,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -116,8 +117,15 @@ final class PublicApiSurfaceTest {
         assertFalse(
                 reached.stream().anyMatch(name -> name.startsWith("domain.output.")),
                 () -> "CLI output vocabulary reached from the library: " + reached);
+        Set<String> reachedConfig = reached.stream()
+                .filter(name -> name.startsWith("domain.config."))
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertEquals(
+                Set.of("domain.config.Credential", "domain.config.InvalidCredentialException"),
+                reachedConfig,
+                () -> "CLI configuration types reached from the library: " + reachedConfig);
         assertFalse(
-                reached.stream().anyMatch(name -> name.startsWith("config.Config")),
+                reached.stream().anyMatch(name -> name.startsWith("domain.config.Config")),
                 () -> "CLI configuration views reached from the library: " + reached);
         assertTrue(
                 reached.stream().noneMatch(name -> name.startsWith("application.")),

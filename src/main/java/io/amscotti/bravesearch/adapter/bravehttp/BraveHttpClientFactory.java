@@ -65,14 +65,16 @@ public final class BraveHttpClientFactory {
 
     /**
      * A fresh redirect-refusing client whose exchanges travel through {@code proxy} when it
-     * says so for their origin; callers own its lifecycle.
+     * says so for their origin, and connect directly — bypassing any ambient JVM default
+     * selector — when {@code proxy} is empty; callers own its lifecycle.
      */
     public HttpClient newClient(Optional<HttpProxy> proxy) {
+        Objects.requireNonNull(proxy, "proxy");
         HttpClient.Builder builder = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(connectTimeout)
-                .executor(executor != null ? executor : Executors.newVirtualThreadPerTaskExecutor());
-        proxy.ifPresent(configured -> builder.proxy(proxySelector(configured)));
+                .executor(executor != null ? executor : Executors.newVirtualThreadPerTaskExecutor())
+                .proxy(proxy.map(BraveHttpClientFactory::proxySelector).orElse(HttpClient.Builder.NO_PROXY));
         return builder.build();
     }
 
@@ -86,10 +88,14 @@ public final class BraveHttpClientFactory {
 
             @Override
             public List<Proxy> select(URI target) {
-                if (!proxy.proxies(target.getHost())) {
+                if (target == null) {
+                    throw new IllegalArgumentException("target URI must not be null");
+                }
+                String host = target.getHost();
+                if (host == null || !proxy.proxies(host)) {
                     return List.of(Proxy.NO_PROXY);
                 }
-                return List.of(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxy.host(), proxy.port())));
+                return List.of(new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(proxy.host(), proxy.port())));
             }
 
             @Override

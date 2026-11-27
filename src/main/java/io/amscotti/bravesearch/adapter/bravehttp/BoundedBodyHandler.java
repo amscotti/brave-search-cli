@@ -83,7 +83,9 @@ public final class BoundedBodyHandler {
                 return new byte[0];
             }
         }
-        Objects.requireNonNull(clock, "clock");
+        if (totalDeadline != null) {
+            Objects.requireNonNull(clock, "clock");
+        }
         // one flag both guards set: either firing ends the preview, whichever kind it was
         AtomicBoolean ended = new AtomicBoolean();
         Thread watchdog = totalDeadline == null ? null : deadlineWatchdog(body, clock, totalDeadline, ended);
@@ -98,7 +100,9 @@ public final class BoundedBodyHandler {
             ByteArrayOutputStream buffered = new ByteArrayOutputStream();
             byte[] chunk = new byte[Math.min(CHUNK, limit)];
             while (buffered.size() < limit) {
-                if (ended.get()) {
+                if (ended.get()
+                        || (cancellation != null && cancellation.cancelled())
+                        || (totalDeadline != null && !clock.instant().isBefore(totalDeadline))) {
                     break;
                 }
                 int read;
@@ -171,7 +175,9 @@ public final class BoundedBodyHandler {
         if (totalDeadline == null && cancellation == null) {
             return readWithoutDeadline(body, limit, breachDiagnostic);
         }
-        Objects.requireNonNull(clock, "clock");
+        if (totalDeadline != null) {
+            Objects.requireNonNull(clock, "clock");
+        }
         return readGuarded(body, limit, breachDiagnostic, clock, totalDeadline, cancellation);
     }
 
@@ -217,17 +223,17 @@ public final class BoundedBodyHandler {
             byte[] chunk = new byte[CHUNK];
             long total = 0;
             while (true) {
-                if (cancelled.get()) {
+                if (cancelled.get() || (cancellation != null && cancellation.cancelled())) {
                     throw new ExchangeCancelledException();
                 }
-                if (breached.get()) {
+                if (breached.get() || (totalDeadline != null && !clock.instant().isBefore(totalDeadline))) {
                     throw new TotalDeadlineExceededException();
                 }
                 int read;
                 try {
                     read = body.read(chunk);
                 } catch (IOException broken) {
-                    if (cancelled.get()) {
+                    if (cancelled.get() || (cancellation != null && cancellation.cancelled())) {
                         // the watcher closed the stream to end a blocked read
                         throw new ExchangeCancelledException();
                     }
@@ -254,7 +260,7 @@ public final class BoundedBodyHandler {
                     throw new TotalDeadlineExceededException();
                 }
             }
-            if (cancelled.get()) {
+            if (cancelled.get() || (cancellation != null && cancellation.cancelled())) {
                 // a watcher close can surface as a clean end of stream; the latch verdict outranks it
                 throw new ExchangeCancelledException();
             }

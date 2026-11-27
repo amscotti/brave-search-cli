@@ -64,8 +64,6 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
 
     private final AnswersStreamPort streams;
 
-    private final CancellationRegistry cancellations;
-
     private final AnswersStreamPresenter streamingPresenter;
 
     @Mixin
@@ -209,7 +207,6 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
                 diagnosticsFactory);
         this.commonOptions = Objects.requireNonNull(commonOptions, "commonOptions");
         this.streams = Objects.requireNonNull(streams, "streams");
-        this.cancellations = Objects.requireNonNull(cancellations, "cancellations");
         this.streamingPresenter = Objects.requireNonNull(streamingPresenter, "streamingPresenter");
     }
 
@@ -287,14 +284,13 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
 
 
     /**
-     * The streaming family's own dispatch step: a stream request opens one exchange through
-     * the streaming port — carrying only the connection budget, never the blocking total
-     * deadline — renders a failed open through the shared failure presenter of the active
-     * mode, and hands an open exchange to the streaming presenter, closing it once the
-     * render returned its exit status. The command registers its own cancellation context
-     * for the dispatch window, so a user signal the process latch delivered while the
-     * exchange was still opening decides the failed open's exit — cause-authoritative, like
-     * every stream path — instead of the open failure's transport status.
+     * The streaming family's own dispatch step: a stream request registers one cancellation
+     * context with the process registry and passes it into the streaming port — carrying only
+     * the connection budget, never the blocking total deadline — so both the opening headers
+     * phase and the live stream share that single latch without duplicate registration. A
+     * failed open renders through the shared failure presenter of the active mode while a
+     * user signal latched on that context decides the exit status; an open exchange renders
+     * through the streaming presenter and closes once the render returns.
      */
     @Override
     protected int dispatchAndPresent(
@@ -307,14 +303,15 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
             return super.dispatchAndPresent(request, credential, output, results, diagnostics);
         }
         CancellationContext cancellation = new CancellationContext();
-        Runnable detach = cancellations.register(cancellation);
+        Runnable detach = cancellations().register(cancellation);
         try {
             Outcome<AnswersStreamExchange> opened = streams.stream(new AnswersStreamDispatch(
                     request,
                     remoteOptions.origin(),
                     credential,
                     remoteOptions.connectTimeout(),
-                    remoteOptions.apiVersionPin()));
+                    remoteOptions.apiVersionPin(),
+                    cancellation));
             return switch (opened) {
                 case Outcome.Success<AnswersStreamExchange> live -> {
                     try (AnswersStreamExchange exchange = live.value()) {
@@ -332,15 +329,13 @@ public final class AnswersCommand extends RemoteCommandSupport<AnswersRequest, A
     }
 
     /** An exchange that never opened carries no stream state: the shared failure presenter renders it per mode. */
-    @SuppressWarnings("unchecked")
     private int renderOpenFailure(
             Outcome.Failure<AnswersStreamExchange> failure,
             AnswersRequest request,
             OutputRequest output,
             ResultWriter results,
             DiagnosticsSink diagnostics) {
-        return presenter.present(
-                (Outcome<AnswersResult>) (Outcome<?>) failure, request, output, results, diagnostics);
+        return presenter.present(failure.widen(), request, output, results, diagnostics);
     }
 
     /**

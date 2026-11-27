@@ -161,10 +161,33 @@ final class FailureAdviceTest {
     }
 
     @Test
-    void aRateLimitWithoutObservedFactsReadsCleanlyWithoutAStraySpace() {
+    void aStatuslessRateLimitPreservesTheLocalPacingDiagnosticVerbatim() {
+        String refusal =
+                "the rate-limit window resets in 2592000s, beyond this walk's maximum wait of 60s; retry after the reset";
+        RateLimitSnapshot monthly = windows(window("month", 2000, 0, Duration.ofSeconds(2592000)));
+
         assertEquals(
-                "web: the Brave API rate limit was reached; retry after a short wait",
-                FailureAdvice.line("web", failure(FailureKind.RATE_LIMITED, "d", null, 0, null)));
+                "web: " + refusal,
+                FailureAdvice.line("web", failure(FailureKind.RATE_LIMITED, refusal, null, 0, monthly)),
+                "a local pacing refusal carries its own timing diagnostic and must not collapse to generic 429 advice");
+        assertEquals(
+                "web: " + refusal,
+                FailureAdvice.line("web", failure(FailureKind.RATE_LIMITED, refusal, null, 0, null)));
+    }
+
+    @Test
+    void aSubMillisecondRateLimitWindowFallsBackToAShortWait() {
+        Outcome.Failure<WebPlaceholder> subMillisecond = failure(
+                FailureKind.RATE_LIMITED,
+                "upstream exchange failed with status 429",
+                null,
+                429,
+                windows(window("request", 1, 0, Duration.ofNanos(500_000))));
+
+        assertEquals(
+                "web: the Brave API rate limit was reached (HTTP 429); retry after a short wait",
+                FailureAdvice.line("web", subMillisecond),
+                "a sub-millisecond window must not claim 'retry after 0 ms'");
     }
 
     @Test

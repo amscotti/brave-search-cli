@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.amscotti.bravesearch.application.exchange.BraveApiOrigin;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamDispatch;
 import io.amscotti.bravesearch.application.port.out.AnswersStreamExchange;
-import io.amscotti.bravesearch.application.port.out.CredentialProvider;
-import io.amscotti.bravesearch.application.port.out.ResolvedCredential;
 import io.amscotti.bravesearch.bootstrap.AnswersComposition;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.answer.AnswerStreamEvent;
@@ -65,8 +63,7 @@ final class StreamRootEquivalenceTest {
     }
 
     private List<AnswerStreamEvent> eventsThroughTheCliRoot(ScriptedSseServer server) throws Exception {
-        AnswersComposition composition =
-                AnswersComposition.process(unusedCredential(), new ExchangeRegistry());
+        AnswersComposition composition = AnswersComposition.process(new ExchangeRegistry());
         Outcome<AnswersStreamExchange> outcome =
                 composition.streams().stream(dispatch(server, streamedRequest()));
         return switch (outcome) {
@@ -129,21 +126,6 @@ final class StreamRootEquivalenceTest {
                 Credential.of(SENTINEL.getBytes(UTF_8)),
                 CONNECT_BUDGET,
                 null);
-    }
-
-    /** A stored-credential source the streaming path never consults: the dispatch carries its own. */
-    private static CredentialProvider unusedCredential() {
-        return new CredentialProvider() {
-            @Override
-            public Credential resolve() {
-                return Credential.of(SENTINEL.getBytes(UTF_8));
-            }
-
-            @Override
-            public ResolvedCredential resolveWithProvenance() {
-                throw new UnsupportedOperationException("no provenance consumer exists on this path");
-            }
-        };
     }
 
     /** One scripted stream exercising every semantic shape: passthrough, text, both tag kinds. */

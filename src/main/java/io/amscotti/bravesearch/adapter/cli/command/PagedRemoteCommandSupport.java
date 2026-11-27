@@ -158,11 +158,11 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
         }
         CancellationContext cancellation = new CancellationContext();
         Runnable detach = cancellations().register(cancellation);
-        try (RemoteWalk<TReq, TRes> walk = exchange().openWalk(dispatchOf(request, credential, cancellation))) {
-            // every page of the walk rides the one transport lifecycle the walk opened, so
-            // the connection to the peer survives from the first page to the last
+        try {
             PaginationService.PagedRun<TRes> run;
-            try {
+            try (RemoteWalk<TReq, TRes> walk = exchange().openWalk(dispatchOf(request, credential, cancellation))) {
+                // every page of the walk rides the one transport lifecycle the walk opened, so
+                // the connection to the peer survives from the first page to the last
                 run = pagination.fetchAll(
                         page -> walk.dispatch(withPage(request, page)),
                         maxPages == null ? maxDocumentedPage() : maxPages,
@@ -172,12 +172,7 @@ public abstract class PagedRemoteCommandSupport<TReq, TRes extends PagedExchange
             } catch (UncheckedIOException writeFailure) {
                 return exitForWalkWriteFailure(writeFailure, cancellation, diagnostics);
             }
-            int presented;
-            try {
-                presented = pagedPresenter.present(run, request, output, results, diagnostics);
-            } catch (UncheckedIOException writeFailure) {
-                return exitForWalkWriteFailure(writeFailure, cancellation, diagnostics);
-            }
+            int presented = pagedPresenter.present(run, request, output, results, diagnostics);
             Optional<Integer> signalExit = WalkExitPolicy.latchedSignalExit(run, cancellation);
             if (signalExit.isPresent()) {
                 // the latch is authoritative: the mode rendered its transport-failure document

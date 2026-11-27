@@ -498,7 +498,9 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
                         results,
                         diagnostics);
                 if (written >= 0) {
-                    return written;
+                    // a user signal that already won the latch outranks a downstream broken
+                    // pipe or write failure during the terminal render
+                    return signalled ? exit : written;
                 }
             }
             case JSON -> {
@@ -525,7 +527,7 @@ public final class AnswersStreamPresenterImpl implements AnswersStreamPresenter 
                         results,
                         diagnostics);
                 if (written >= 0) {
-                    return written;
+                    return signalled ? exit : written;
                 }
             }
             case HUMAN, RAW -> diagnostics.emit(

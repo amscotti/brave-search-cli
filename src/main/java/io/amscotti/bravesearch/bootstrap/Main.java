@@ -43,10 +43,17 @@ import io.amscotti.bravesearch.domain.config.LocalConfigException;
 import io.amscotti.bravesearch.domain.error.FailureKind;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -122,7 +129,6 @@ public final class Main implements Runnable {
                 exchanges,
                 config,
                 Compositions.process(
-                        config.credentials(),
                         EnvironmentCredentialSource.processEnvironmentLookup(),
                         exchanges,
                         mappers,
@@ -186,13 +192,7 @@ public final class Main implements Runnable {
         CommandLine commandLine = assemble(
                 StdoutWriters.passthroughBytes(System.out),
                 new OutputStreamResultWriter(StdoutWriters.byteStdout()));
-        // an execution failure inside a command never becomes picocli's stack trace and
-        // software status: this handler owns the redacted line and its exit code. Picocli
-        // converts the handler's verdict into the exit code and never rethrows past it, so
-        // the mappings the guarded entry promises are decided here for a failure that
-        // escapes a running command: a configuration failure keeps the
-        // local-configuration status, everything else the internal one
-        commandLine.setExecutionExceptionHandler((failure, cmd, parse) -> escapedFailureStatus(failure));
+        commandLine.setErr(new PrintWriter(new OutputStreamWriter(System.err, StandardCharsets.UTF_8), true));
         return commandLine.execute(args);
     }
 
@@ -236,6 +236,13 @@ public final class Main implements Runnable {
         // because the version flag is inherited by the whole tree and a node without the
         // provider would accept the flag and print nothing
         propagateWiring(commandLine, stdout, new VersionProvider());
+        // an execution failure inside a command never becomes picocli's stack trace and
+        // software status: this handler owns the redacted line and its exit code. Picocli
+        // converts the handler's verdict into the exit code and never rethrows past it, so
+        // the mappings the guarded entry promises are decided here for a failure that
+        // escapes a running command: a configuration failure keeps the
+        // local-configuration status, everything else the internal one
+        commandLine.setExecutionExceptionHandler((failure, cmd, parse) -> escapedFailureStatus(failure, cmd));
         // strict parsing lands after registration so every subcommand's parser is covered
         return StrictOptionParsing.apply(commandLine);
     }
@@ -494,7 +501,7 @@ public final class Main implements Runnable {
         try {
             Signal.handle(new Signal("INT"), signal -> {
                 if (signals.interrupt()) {
-                    System.exit(ExitCodeMapper.SIGINT);
+                    Runtime.getRuntime().halt(ExitCodeMapper.SIGINT);
                 }
             });
         } catch (IllegalArgumentException reservedByPlatform) {
@@ -503,13 +510,14 @@ public final class Main implements Runnable {
         try {
             Signal.handle(new Signal("TERM"), signal -> {
                 if (signals.terminate()) {
-                    System.exit(ExitCodeMapper.SIGTERM);
+                    Runtime.getRuntime().halt(ExitCodeMapper.SIGTERM);
                 }
             });
         } catch (IllegalArgumentException reservedByPlatform) {
             // the platform's own termination handling decides the status without our latch
         }
-        System.exit(runGuarded(() -> new Main(exchanges), args));
+        System.exit(runGuarded(
+                () -> new Main(exchanges), EnvironmentCredentialSource.processEnvironmentLookup(), args));
     }
 
     /**
@@ -520,24 +528,29 @@ public final class Main implements Runnable {
      * machine's own default status. A configuration failure ends as the documented
      * local-configuration status with one redacted diagnostic line. Failures inside a
      * running command are converted by the execution handler installed in {@link
-     * #execute(String...)}; both share the same mappings.
+     * #assemble(PrintWriter, ResultWriter)}; both share the same mappings.
      */
     static int runGuarded(Supplier<Main> composition, String... args) {
+        return runGuarded(composition, EnvironmentCredentialSource.processEnvironmentLookup(), args);
+    }
+
+    /**
+     * The guarded process entry over an injected environment lookup, so the internal-error
+     * trace opt-in is honored even when construction fails before the command line exists.
+     */
+    static int runGuarded(
+            Supplier<Main> composition, Function<String, String> environmentLookup, String... args) {
+        Objects.requireNonNull(composition, "composition");
+        Objects.requireNonNull(environmentLookup, "environmentLookup");
         Main built = null;
         try {
             built = composition.get();
             return built.runRoot(args);
         } catch (LocalConfigException | CredentialResolutionException misconfigured) {
-            return localConfigurationStatus(misconfigured);
+            return localConfigurationStatus(misconfigured, null);
         } catch (Throwable internal) {
-            if (built == null) {
-                // a composition that never finished building has no opt-in of its own
-                System.err.println(COMMAND_NAME + ": unexpected internal error (" + reported(internal)
-                        .getClass()
-                        .getSimpleName() + ")");
-                return ExitCodeMapper.forKind(FailureKind.INTERNAL);
-            }
-            return built.internalFailureStatus(internal);
+            boolean trace = built != null ? built.traceInternalErrors : DebugTrace.requested(environmentLookup);
+            return reportInternalFailure(internal, trace, null);
         }
     }
 
@@ -547,7 +560,7 @@ public final class Main implements Runnable {
      * #runGuarded(Supplier, String...)}.
      */
     public int runGuarded(String... args) {
-        return runGuarded(() -> this, args);
+        return runGuarded(() -> this, name -> null, args);
     }
 
     /**
@@ -556,31 +569,44 @@ public final class Main implements Runnable {
      * user input or credential material. A process that opted in through
      * {@link DebugTrace#VARIABLE} additionally receives a trace of frames and exception types.
      */
-    private int internalFailureStatus(Throwable failure) {
+    private static int reportInternalFailure(Throwable failure, boolean trace, CommandLine cmd) {
         Throwable reported = reported(failure);
-        System.err.println(COMMAND_NAME + ": unexpected internal error (" + reported.getClass().getSimpleName() + ")");
-        if (traceInternalErrors) {
-            printTrace(reported);
+        PrintWriter err = errorWriter(cmd);
+        err.println(COMMAND_NAME + ": unexpected internal error (" + exceptionTypeName(reported) + ")");
+        if (trace) {
+            printTrace(err, reported);
         }
+        err.flush();
         return ExitCodeMapper.forKind(FailureKind.INTERNAL);
     }
 
     /**
-     * The opt-in trace of an internal failure: the frames of the failure and of every cause
-     * in its chain, with the exception types named — and nothing else. No message appears
-     * anywhere in it, because a message can quote user input or credential material; the
-     * frames already say where the failure happened, which is what a bug report needs.
+     * The opt-in trace of an internal failure: the frames of the failure, of every cause in
+     * its chain, and of every suppressed exception, with the exception types named — and
+     * nothing else. No message appears anywhere in it, because a message can quote user input
+     * or credential material; the frames already say where the failure happened, which is what
+     * a bug report needs.
      */
-    private static void printTrace(Throwable failure) {
-        System.err.println(
-                COMMAND_NAME + ": debug trace, exception messages withheld: " + failure.getClass().getSimpleName());
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause != failure) {
-                System.err.println(COMMAND_NAME + ": caused by: " + cause.getClass().getSimpleName());
+    private static void printTrace(PrintWriter err, Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        printChain(err, "debug trace, exception messages withheld", failure, seen);
+    }
+
+    private static void printChain(PrintWriter err, String openingLabel, Throwable root, Set<Throwable> seen) {
+        String label = openingLabel;
+        for (Throwable current = root; current != null; current = current.getCause()) {
+            if (!seen.add(current)) {
+                err.println(COMMAND_NAME + ": " + label + " (circular reference): " + exceptionTypeName(current));
+                return;
             }
-            for (StackTraceElement frame : cause.getStackTrace()) {
-                System.err.println("    at " + frame);
+            err.println(COMMAND_NAME + ": " + label + ": " + exceptionTypeName(current));
+            for (StackTraceElement frame : current.getStackTrace()) {
+                err.println("    at " + frame);
             }
+            for (Throwable suppressed : current.getSuppressed()) {
+                printChain(err, "suppressed", suppressed, seen);
+            }
+            label = "caused by";
         }
     }
 
@@ -591,15 +617,15 @@ public final class Main implements Runnable {
      * configuration failure keeps the local-configuration status with its redacted message,
      * everything else ends as the internal status.
      */
-    private int escapedFailureStatus(Throwable failure) {
+    private int escapedFailureStatus(Throwable failure, CommandLine cmd) {
         Throwable reported = reported(failure);
         if (reported instanceof LocalConfigException misconfigured) {
-            return localConfigurationStatus(misconfigured);
+            return localConfigurationStatus(misconfigured, cmd);
         }
         if (reported instanceof CredentialResolutionException unresolved) {
-            return localConfigurationStatus(unresolved);
+            return localConfigurationStatus(unresolved, cmd);
         }
-        return internalFailureStatus(failure);
+        return reportInternalFailure(reported, traceInternalErrors, cmd);
     }
 
     /**
@@ -607,9 +633,44 @@ public final class Main implements Runnable {
      * redacted message as the single stderr line and the documented configuration exit
      * code.
      */
-    private static int localConfigurationStatus(Exception misconfigured) {
-        System.err.println(COMMAND_NAME + ": " + misconfigured.getMessage());
+    private static int localConfigurationStatus(Exception misconfigured, CommandLine cmd) {
+        PrintWriter err = errorWriter(cmd);
+        err.println(commandPrefix(cmd) + ": " + misconfigured.getMessage());
+        err.flush();
         return ExitCodeMapper.forKind(FailureKind.LOCAL_CONFIG);
+    }
+
+    private static PrintWriter errorWriter(CommandLine cmd) {
+        return cmd != null
+                ? cmd.getErr()
+                : new PrintWriter(new OutputStreamWriter(System.err, StandardCharsets.UTF_8), true);
+    }
+
+    /** Dotted subcommand path below the root (e.g. {@code context} or {@code places.details}), or the root name. */
+    private static String commandPrefix(CommandLine cmd) {
+        if (cmd == null || cmd.getParent() == null) {
+            return COMMAND_NAME;
+        }
+        Deque<String> segments = new ArrayDeque<>();
+        for (CommandLine node = cmd; node.getParent() != null; node = node.getParent()) {
+            segments.addFirst(node.getCommandName());
+        }
+        return String.join(".", segments);
+    }
+
+    /**
+     * The simple name of the throwable's concrete class, or of its nearest named superclass
+     * when it is an anonymous subclass whose own simple name is empty — never a package-qualified
+     * class name.
+     */
+    private static String exceptionTypeName(Throwable failure) {
+        for (Class<?> type = failure.getClass(); type != null; type = type.getSuperclass()) {
+            String simple = type.getSimpleName();
+            if (!simple.isEmpty()) {
+                return simple;
+            }
+        }
+        return Throwable.class.getSimpleName();
     }
 
     /** The failure to report: picocli wraps a command's own failure; the cause is the failure itself. */

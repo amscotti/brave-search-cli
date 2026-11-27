@@ -35,8 +35,9 @@ import java.util.function.Function;
  * <p>Each dispatch is a self-contained lifecycle: the invocation's already-resolved
  * credential is handed to a fresh single-exchange gateway, whose transport and HTTP client
  * close with the gateway after the exchange, so one invocation never leaves an open client
- * behind and never resolves its credential twice. A page walk reuses that same lifecycle per
- * page, strictly sequentially.
+ * behind and never resolves its credential twice. A sequential page walk instead opens one
+ * shared transport and HTTP client across every page through {@link RemoteExchange#openWalk}
+ * and closes it when the walk finishes.
  */
 public record WebSearchComposition(
         CredentialProvider loopbackTestToken,
@@ -54,18 +55,19 @@ public record WebSearchComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static WebSearchComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static WebSearchComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static WebSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static WebSearchComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static WebSearchComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static WebSearchComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<WebSearchRequest, WebSearchResult> exchange =
                 RemoteExchanges.blocking(WebSearchEndpoint::assemble, WebSearchResult::new, environmentLookup);

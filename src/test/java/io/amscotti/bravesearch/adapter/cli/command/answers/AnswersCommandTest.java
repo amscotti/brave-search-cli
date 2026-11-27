@@ -317,6 +317,30 @@ final class AnswersCommandTest {
     }
 
     @Test
+    void aStreamingDispatchReceivesTheRegisteredCancellationContextAndDetachesOnExit() {
+        Harness harness = new Harness();
+        harness.streamingExit = 0;
+        List<CancellationContext> liveContexts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<CancellationContext> registered =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        harness.cancellations = context -> {
+            registered.set(context);
+            liveContexts.add(context);
+            return () -> liveContexts.remove(context);
+        };
+
+        Harness.RunResult result = harness.run("answers", "q");
+
+        assertEquals(0, result.exitCode(), () -> result.describe());
+        assertEquals(1, harness.streams.dispatches.size());
+        assertSame(
+                registered.get(),
+                harness.streams.dispatches.getFirst().cancellation(),
+                "the streaming dispatch carries the command's registered cancellation context");
+        assertTrue(liveContexts.isEmpty(), "the cancellation context detaches once the command exits");
+    }
+
+    @Test
     void rawOutputIsAcceptedForTheSingleBlockingRequest() {
         Harness harness = new Harness();
 

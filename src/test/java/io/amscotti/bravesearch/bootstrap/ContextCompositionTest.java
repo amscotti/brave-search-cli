@@ -35,15 +35,13 @@ final class ContextCompositionTest {
         AtomicInteger testKeyLookups = new AtomicInteger();
         String proxyToken = "proxy-placeholder-token-" + java.util.UUID.randomUUID().toString().replace("-", "");
         Map<String, String> keyedEnvironment = Map.of("BRAVE_SEARCH_TEST_KEY", proxyToken);
-        ContextComposition process = ContextComposition.process(
-                storedCredentials(),
-                name -> {
-                    if ("BRAVE_SEARCH_TEST_KEY".equals(name)) {
-                        testKeyLookups.incrementAndGet();
-                        return keyedEnvironment.get(name);
-                    }
-                    return null;
-                });
+        ContextComposition process = ContextComposition.process(name -> {
+            if ("BRAVE_SEARCH_TEST_KEY".equals(name)) {
+                testKeyLookups.incrementAndGet();
+                return keyedEnvironment.get(name);
+            }
+            return null;
+        });
 
         RunResult result = runMain(process, "context", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -83,7 +81,13 @@ final class ContextCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(new ExchangeRegistry(), config, Compositions.process(config.credentials(), new ExchangeRegistry()).withWebSearch(webComposition()).withContext(context))
+            int exitCode = new Main(
+                            new ExchangeRegistry(),
+                            config,
+                            Compositions.process(name -> null, new ExchangeRegistry())
+                                    .withWebSearch(webComposition())
+                                    .withContext(context),
+                            name -> null)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {
@@ -93,7 +97,7 @@ final class ContextCompositionTest {
     }
 
     private static WebSearchComposition webComposition() {
-        WebSearchComposition process = WebSearchComposition.process(storedCredentials());
+        WebSearchComposition process = WebSearchComposition.process(name -> null);
         return new WebSearchComposition(
                 process.loopbackTestToken(), process.exchange(), failingWebPresenter(), process.pagination(), process.pagedPresenter());
     }

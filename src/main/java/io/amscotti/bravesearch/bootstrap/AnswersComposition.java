@@ -66,20 +66,18 @@ public record AnswersComposition(
      * register its exchanges with the same registry the bootstrap's interrupt handler
      * latches, so a SIGINT reaches a live stream.
      */
-    public static AnswersComposition process(CredentialProvider storedCredentials, CancellationRegistry registry) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup(), registry);
+    public static AnswersComposition process(CancellationRegistry registry) {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup(), registry);
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static AnswersComposition process(
-            CredentialProvider storedCredentials, Function<String, String> environmentLookup, CancellationRegistry registry) {
+    static AnswersComposition process(Function<String, String> environmentLookup, CancellationRegistry registry) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, registry, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, registry, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and machine codecs injected. */
     static AnswersComposition process(
-            CredentialProvider storedCredentials,
             Function<String, String> environmentLookup,
             CancellationRegistry registry,
             JsonMappers mappers,

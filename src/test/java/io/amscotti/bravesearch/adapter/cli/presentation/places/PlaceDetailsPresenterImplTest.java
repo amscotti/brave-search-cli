@@ -2,6 +2,7 @@ package io.amscotti.bravesearch.adapter.cli.presentation.places;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -335,6 +336,46 @@ final class PlaceDetailsPresenterImplTest {
         assertTrue(
                 jsonl.stdoutText().contains("\"policy\":\"request\""),
                 "and so does the jsonl error record: " + jsonl.stdoutText());
+    }
+
+    @Test
+    void aRefusedPacingWaitKeepsItsTimingDiagnosticAndObservedWindowsAcrossModes() {
+        String refusal =
+                "the rate-limit window resets in 2592000s, beyond this walk's maximum wait of 60s; retry after the reset";
+        RateLimitSnapshot monthly = new RateLimitSnapshot(
+                List.of(new RateLimitWindow("month", 2000, 0, Duration.ofSeconds(2592000))), List.of(), Instant.EPOCH);
+        PaginationService.PagedRun<PlaceEnrichmentResult> run = new PaginationService.PagedRun<>(
+                2,
+                List.of(new PagedSearch.Page<>(0, 1, null, resultOf(200, CHUNK_ONE_BODY, monthly))),
+                new Outcome.Failure<>(FailureKind.RATE_LIMITED, refusal, null, monthly, 0));
+
+        Rendered human = render(run, requestOfTwentyFiveIds(), human(false));
+        assertEquals(5, human.exit());
+        assertEquals("", human.stdoutText());
+        assertEquals(List.of("places.details: " + refusal + " (1 of 2 requests completed)"), human.stderr());
+        assertFalse(human.stderr().getFirst().contains("retry after a short wait"), human.stderr().toString());
+
+        Rendered json = render(run, requestOfTwentyFiveIds(), machine(OutputMode.JSON, false));
+        assertEquals(5, json.exit());
+        assertEquals(List.of("places.details: " + refusal + " (1 of 2 requests completed)"), json.stderr());
+        assertTrue(json.stdoutText().contains("\"code\":\"RATE_LIMITED\""), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"policy\":\"month\""), json.stdoutText());
+        assertTrue(json.stdoutText().contains("\"reset_ms\":2592000000"), json.stdoutText());
+        assertTrue(
+                schemas.validate("envelope-error.schema.json", json.stdout()).isEmpty(),
+                "the refused-wait failure envelope satisfies the published error schema: " + json.stdoutText());
+
+        Rendered jsonl = render(run, requestOfTwentyFiveIds(), machine(OutputMode.JSONL, false));
+        assertEquals(5, jsonl.exit());
+        assertEquals(List.of(), jsonl.stderr(), "jsonl owns its failure explanation on stdout");
+        assertTrue(jsonl.stdoutText().contains("\"code\":\"RATE_LIMITED\""), jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"policy\":\"month\""), jsonl.stdoutText());
+        assertTrue(jsonl.stdoutText().contains("\"reset_ms\":2592000000"), jsonl.stdoutText());
+        for (String line : jsonl.stdoutText().stripTrailing().split("\n")) {
+            assertTrue(
+                    schemas.validateText("jsonl-record.schema.json", line).isEmpty(),
+                    "every jsonl record satisfies the published schema: " + line);
+        }
     }
 
     /** One exhausted request window, as the failing chunk's own response headers explained it. */

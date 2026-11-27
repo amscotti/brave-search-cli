@@ -68,18 +68,31 @@ final class ExitCodeMapperTest {
         assertEquals(0, ExitCodeMapper.BROKEN_PIPE);
     }
 
+    private static final Map<CancellationContext.Cause, Integer> EXPECTED_CAUSE_CODES =
+            Map.of(
+                    CancellationContext.Cause.SIGINT, 130,
+                    CancellationContext.Cause.SIGTERM, 143,
+                    CancellationContext.Cause.BROKEN_PIPE, 0,
+                    CancellationContext.Cause.CLOSED, 0,
+                    CancellationContext.Cause.IDLE_TIMEOUT, 6,
+                    CancellationContext.Cause.WALL_TIMEOUT, 6,
+                    CancellationContext.Cause.SUBSCRIBER_FAILURE, 6,
+                    CancellationContext.Cause.TRANSPORT_FAILURE, 6);
+
     @Test
     void everyStreamingTerminalCauseReadsItsExitStatusFromThisTable() {
         // this table is the one owner of process exit statuses: the streaming latch names
         // why a run ended and knows nothing of statuses
-        assertEquals(130, ExitCodeMapper.forCause(CancellationContext.Cause.SIGINT));
-        assertEquals(143, ExitCodeMapper.forCause(CancellationContext.Cause.SIGTERM));
-        assertEquals(0, ExitCodeMapper.forCause(CancellationContext.Cause.BROKEN_PIPE));
-        assertEquals(0, ExitCodeMapper.forCause(CancellationContext.Cause.CLOSED));
-        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.IDLE_TIMEOUT));
-        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.WALL_TIMEOUT));
-        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.SUBSCRIBER_FAILURE));
-        assertEquals(6, ExitCodeMapper.forCause(CancellationContext.Cause.TRANSPORT_FAILURE));
+        for (Map.Entry<CancellationContext.Cause, Integer> expected : EXPECTED_CAUSE_CODES.entrySet()) {
+            assertEquals(
+                    expected.getValue(),
+                    ExitCodeMapper.forCause(expected.getKey()),
+                    () -> "wrong exit status for " + expected.getKey());
+        }
+        assertEquals(
+                EXPECTED_CAUSE_CODES.size(),
+                CancellationContext.Cause.values().length,
+                "the exit table must cover every streaming cancellation cause exactly");
         assertThrows(NullPointerException.class, () -> ExitCodeMapper.forCause(null));
     }
 }

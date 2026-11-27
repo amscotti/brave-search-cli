@@ -53,6 +53,12 @@ final class WebSearchNativeSmokeTest {
 
     @Test
     @Timeout(180)
+    void aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes() throws Exception {
+        WebScenarios.aRejectedSubscriptionTokenExitsFourInHumanAndJsonModes(webCommand());
+    }
+
+    @Test
+    @Timeout(180)
     void rateLimitedJsonlErrorCarriesTheObservedWindows() throws Exception {
         WebScenarios.rateLimitedJsonlErrorCarriesTheObservedWindows(webCommand());
     }

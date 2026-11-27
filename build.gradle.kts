@@ -172,9 +172,10 @@ tasks.named("check") {
 val liveBraveTests = providers.gradleProperty("liveBraveTests").map { it == "true" }.getOrElse(false)
 
 tasks.named<Test>("test") {
-  // the live suite is serial by policy; the hermetic suite forks freely, because every
-  // process test owns its loopback port, its environment, and its process group
-  maxParallelForks = if (liveBraveTests) 1 else 4
+  // the live suite is serial by policy; the hermetic suite forks up to half the host cores
+  // (capped at four), because every process test owns its loopback port, its environment,
+  // and its process group
+  maxParallelForks = if (liveBraveTests) 1 else (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
   useJUnitPlatform {
     if (!liveBraveTests) {
       excludeTags("live")

@@ -11,6 +11,8 @@ import io.amscotti.bravesearch.adapter.cli.presentation.ResultWriter;
 import io.amscotti.bravesearch.adapter.cli.presentation.WriterDiagnosticsSink;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.ConfigShowRecordCodec;
 import io.amscotti.bravesearch.adapter.cli.presentation.json.JsonMappers;
+import io.amscotti.bravesearch.adapter.config.CredentialResolver;
+import io.amscotti.bravesearch.adapter.config.EnvironmentCredentialSource;
 import io.amscotti.bravesearch.adapter.config.SecretInput;
 import io.amscotti.bravesearch.application.port.out.ConfigStore;
 import io.amscotti.bravesearch.application.port.out.CredentialProvider;
@@ -33,6 +35,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -287,6 +290,55 @@ final class ConfigCommandsTest {
         assertEquals("", result.stdout(), "a failing show writes no result record");
         assertTrue(result.stderr().contains("invalid credential"), () -> result.describe());
         assertTrue(result.stderr().contains("environment BRAVE_API_KEY"), () -> result.describe());
+    }
+
+    @Test
+    void showRejectsAnUnwirableTokenFromEnvironmentOrHandEditedConfigFileInHumanAndJsonModes() {
+        String unwirable = "BSA-kappa-\u03ba";
+        RecordingStore handEditedStore = RecordingStore.holding(unwirable);
+        CredentialProvider fromEnv = new CredentialResolver(
+                new EnvironmentCredentialSource(Map.of("BRAVE_API_KEY", unwirable)::get),
+                () -> Optional.empty());
+        CredentialProvider fromFile = new CredentialResolver(
+                new EnvironmentCredentialSource(Map.<String, String>of()::get),
+                () -> handEditedStore.load().credential());
+        CredentialProvider rawUnwirable = new CredentialProvider() {
+            @Override
+            public Credential resolve() {
+                return credential(unwirable);
+            }
+
+            @Override
+            public ResolvedCredential resolveWithProvenance() {
+                return new ResolvedCredential(credential(unwirable), "environment BRAVE_API_KEY", false);
+            }
+        };
+
+        for (String[] args : new String[][] {{"show"}, {"show", "--output", "json"}}) {
+            RunResult envResult = run(new Cli(ScriptedSecrets.absent(), new RecordingStore(), fromEnv), args);
+            assertEquals(3, envResult.exitCode(), () -> envResult.describe());
+            assertEquals("", envResult.stdout(), () -> envResult.describe());
+            assertTrue(envResult.stderr().contains("environment BRAVE_API_KEY"), () -> envResult.describe());
+            assertTrue(
+                    envResult.stderr().contains("an HTTP header value cannot carry"), () -> envResult.describe());
+            assertNoLeak(envResult, unwirable);
+
+            RunResult fileResult = run(new Cli(ScriptedSecrets.absent(), handEditedStore, fromFile), args);
+            assertEquals(3, fileResult.exitCode(), () -> fileResult.describe());
+            assertEquals("", fileResult.stdout(), () -> fileResult.describe());
+            assertTrue(fileResult.stderr().contains("config file"), () -> fileResult.describe());
+            assertTrue(
+                    fileResult.stderr().contains("an HTTP header value cannot carry"), () -> fileResult.describe());
+            assertNoLeak(fileResult, unwirable);
+
+            RunResult directResult = run(new Cli(ScriptedSecrets.absent(), new RecordingStore(), rawUnwirable), args);
+            assertEquals(3, directResult.exitCode(), () -> directResult.describe());
+            assertEquals("", directResult.stdout(), () -> directResult.describe());
+            assertTrue(directResult.stderr().contains("environment BRAVE_API_KEY"), () -> directResult.describe());
+            assertTrue(
+                    directResult.stderr().contains("an HTTP header value cannot carry"), () -> directResult.describe());
+            assertNoLeak(directResult, unwirable);
+        }
     }
 
     @Test

@@ -140,12 +140,67 @@ final class CredentialResolverTest {
     }
 
     @Test
-    void multibyteEnvironmentValueIsPreservedByteForByte() throws Exception {
-        String token = "ключ-キー-\uD83E\uDDEA-key";
+    void multibyteEnvironmentValueInsideHeaderAlphabetIsPreservedByteForByte() throws Exception {
+        // every character sits above U+007F so UTF-8 uses two bytes, while remaining inside the
+        // ISO-8859-1 alphabet an HTTP header value can carry
+        String token = "\u00e9-\u00ff-\u00df-key";
         ResolvedCredential resolution =
                 resolver(Map.of("BRAVE_API_KEY", token), FileView.empty()).resolveWithProvenance();
         assertEquals(credential(token), resolution.credential());
         assertEquals(token, new String(resolution.credential().tokenBytes(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void unwirableCanonicalVariableFailsClosedNamingTheSourceWithoutFallingBack() {
+        String sentinel = sentinel() + "-\u03ba";
+        FileView file = FileView.of("file-value");
+
+        CredentialResolutionException failure = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver(
+                                Map.of("BRAVE_API_KEY", sentinel, "BRAVE_SEARCH_API_KEY", "alias-value"),
+                                file)
+                        .resolveWithProvenance());
+
+        assertEquals(CredentialResolutionException.Category.INVALID, failure.category());
+        assertEquals(Optional.of(CANONICAL_SOURCE), failure.sourceName());
+        assertTrue(failure.getMessage().contains(CANONICAL_SOURCE), () -> failure.getMessage());
+        assertTrue(failure.getMessage().contains("an HTTP header value cannot carry"), () -> failure.getMessage());
+        assertFalse(failure.getMessage().contains(sentinel), "the failure must not carry token material");
+        assertEquals(0, file.loads(), "an unwirable higher source must not fall back to the file");
+    }
+
+    @Test
+    void unwirableAliasVariableFailsClosedNamingTheSourceWithoutFallingBack() {
+        String sentinel = sentinel() + "-\u03ba";
+        FileView file = FileView.of("file-value");
+
+        CredentialResolutionException failure = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver(Map.of("BRAVE_SEARCH_API_KEY", sentinel), file).resolveWithProvenance());
+
+        assertEquals(CredentialResolutionException.Category.INVALID, failure.category());
+        assertEquals(Optional.of(ALIAS_SOURCE), failure.sourceName());
+        assertTrue(failure.getMessage().contains(ALIAS_SOURCE), () -> failure.getMessage());
+        assertTrue(failure.getMessage().contains("an HTTP header value cannot carry"), () -> failure.getMessage());
+        assertFalse(failure.getMessage().contains(sentinel), "the failure must not carry token material");
+        assertEquals(0, file.loads(), "an unwirable alias must not fall back to the file");
+    }
+
+    @Test
+    void unwirableFileCredentialFailsClosedNamingTheConfigFileWithoutEchoingIt() {
+        String sentinel = sentinel() + "-\u03ba";
+        FileView file = FileView.of(sentinel);
+
+        CredentialResolutionException failure = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver(Map.of(), file).resolveWithProvenance());
+
+        assertEquals(CredentialResolutionException.Category.INVALID, failure.category());
+        assertEquals(Optional.of(FILE_SOURCE), failure.sourceName());
+        assertTrue(failure.getMessage().contains(FILE_SOURCE), () -> failure.getMessage());
+        assertTrue(failure.getMessage().contains("an HTTP header value cannot carry"), () -> failure.getMessage());
+        assertFalse(failure.getMessage().contains(sentinel), "the failure must not carry token material");
     }
 
     @Test

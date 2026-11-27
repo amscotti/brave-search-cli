@@ -14,13 +14,13 @@ native CLI executable.
 | Package | Responsibility |
 | --- | --- |
 | `io.amscotti.bravesearch.domain` | Immutable, endpoint-specific request, projection, error, and metadata values. `domain.error.Outcome` is the sealed result type (`Success`/`Failure`), `domain.error.FailureKind` the enumerated failure category, `domain.error.FailureSignal` the precedence-ordered failure conditions that also cover user interruption, and `domain.output.OutputMode` the output-channel vocabulary shared by option parsing and presentation. `domain.output` is deliberately a domain package: its vocabulary is the CLI contract's own language — the mode words option parsing accepts, presentation renders, and the exit mapping arbitrates — so placing it anywhere else would make the innermost shared concepts depend on an outer layer. No picocli, HTTP, Jackson, filesystem, environment, console, or standard-stream access. |
-| `io.amscotti.bravesearch.application` | The sequential page-walk orchestrator and its sliced pacing waiter (`application.service`) and the outbound ports the composition roots drive (`application.port.out`). Depends only on domain and JDK types; synchronous ports return a sealed `Outcome<T>` whose failures are immutable data carrying a `FailureKind` and a redacted diagnostic, never a raw secret-bearing throwable cause. The remote commands share one endpoint-generic port shape: a command dispatches a `RemoteDispatch<Req>` — the parsed invocation carrying origin, the preflight-resolved credential, budgets, version pin, and cancellation latch — through a `RemoteExchange<Req, Res>`, whose single dispatch is a self-contained transport lifecycle and whose walk form (`RemoteWalk`) carries a sequential run over one transport lifecycle; credentials route between providers by the origin's rule through `CredentialProvider.routedTo`. `application.stream` owns the transport-agnostic streaming run machinery: the terminal-cause latch (`CancellationContext`, with an uninterruptible and an interruptible await), the registry contract for live runs (`CancellationRegistry`), the cold single-subscription body publisher, the writer relay with its broken-pipe latch, and the deadline watchdog (see `docs/adr/0005-stream-cancellation.md`). `application.exchange` owns the transport-agnostic exchange vocabulary, itemized: the loopback-verified origin policy whose rule the credential routing applies, the injectable localhost-resolver seam that policy verifies loopback through, the composed request with its deterministic header assembly and product user agent, the strictly percent-encoded request URI with its redacted rendering, the completed response, the injected response byte ceilings (`ResponseLimits`), the response content-coding trichotomy (`ContentCoding`) those ceilings key off, and the typed response-rejection signal (`ResponseRejectionException`) of a bounded exchange gone malformed. |
+| `io.amscotti.bravesearch.application` | The sequential page-walk orchestrator and its sliced pacing waiter (`application.service`) and the outbound ports the composition roots drive (`application.port.out`). Depends only on domain and JDK types; synchronous ports return a sealed `Outcome<T>` whose failures are immutable data carrying a `FailureKind` and a redacted diagnostic, never a raw secret-bearing throwable cause. The remote commands share one endpoint-generic port shape: a command dispatches a `RemoteDispatch<Req>` — the parsed invocation carrying origin, the preflight-resolved credential, budgets, version pin, and cancellation latch — through a `RemoteExchange<Req, Res>`, whose single dispatch is a self-contained transport lifecycle and whose walk form (`RemoteWalk`) carries a sequential run over one transport lifecycle; credentials route between providers by the origin's rule through `CredentialProvider.routedTo`. `application.stream` owns the transport-agnostic streaming run machinery: the terminal-cause latch (`CancellationContext`, with an uninterruptible and an interruptible await), the registry contract for live runs (`CancellationRegistry`), the cold single-subscription body publisher, the writer relay with its broken-pipe latch, and the deadline watchdog (see `docs/adr/0005-stream-cancellation.md`). `application.exchange` owns the transport-agnostic exchange vocabulary, itemized: the loopback-verified origin policy whose rule the credential routing applies, the injectable localhost-resolver seam that policy verifies loopback through, the upstream HTTP proxy model and bypass/loopback routing policy (`HttpProxy`), the composed request with its deterministic header assembly and product user agent, the strictly percent-encoded request URI with its redacted rendering, the completed response, the injected response byte ceilings (`ResponseLimits`), the response content-coding trichotomy (`ContentCoding`) those ceilings key off, and the typed response-rejection signal (`ResponseRejectionException`) of a bounded exchange gone malformed. |
 | `io.amscotti.bravesearch.adapter.bravehttp` | The Brave HTTP transport: request serialization, response bounds, status mapping, rate metadata, SSE handling, and decoded body bytes. Its `json` subpackage owns tolerant upstream decoding and `endpoint` holds the gateways: one endpoint-generic blocking gateway (`BraveHttpBlockingGateway`, parameterized by the endpoint's request assembly and result projection, to which every per-endpoint port is bound), the streaming gateway, and the probe gateway that opens streaming exchanges over `java.net.http`. Never imports another adapter. |
 | `io.amscotti.bravesearch.adapter.cli` | picocli declarations (`command`, `option`), endpoint-valid option combinations, use-case invocation, exit mapping (`exit`), and presentation (`presentation`, with `presentation.json` for schema-versioned machine output; `DiagnosticsSink` and `ResultWriter` keep stderr diagnostics separate from stdout documents, and `ModeAwareWarnings` routes advisories to the channel the active mode owns). Presentation consumes application/domain values and is not an application port. |
 | `io.amscotti.bravesearch.adapter.config` | Environment lookup, path resolution, secure reads/writes of the credential file, and console input. The only adapter that reads the API-key environment variable. |
 | `io.amscotti.bravesearch.api` | The public library surface: `BraveSearchClient`, its builder, and the public response/streaming types. References only `api..`, `domain..`, JDK types, and the allowlisted exported application types. |
 | `io.amscotti.bravesearch.api.internal` | The library-side composition package. `Assembler` is the only class here that instantiates concrete adapters; it wires them into a plain record of functions the public builder unpacks, and it injects the tolerant upstream codec through which the facade materializes the caller-owned `JsonNode` snapshot at the API boundary (see `docs/adr/0001-public-java-api-shape.md`). |
-| `io.amscotti.bravesearch.bootstrap` | The CLI composition root and the sole process entry point (`Main`). Owns process exit, the SIGINT and SIGTERM latches for every live exchange — streaming runs and single-request dispatches alike — and the CLI's instantiation of adapters. |
+| `io.amscotti.bravesearch.bootstrap` | The CLI composition root and the sole process entry point (`Main`). Owns process exit, the SIGINT and SIGTERM latches for every live exchange — streaming runs and single-request dispatches alike, with repeated-signal immediate termination owned by `UserSignals` — and the CLI's instantiation of adapters. |
 
 ## Executable dependency, transport, stream, and environment rules
 
@@ -45,9 +45,10 @@ the layer packages whose isolation they violate and are never executed.
   type's own constructor chaining — and a nested class constructing its owner — is the
   type's implementation rather than composition from outside, so a constructor call whose
   origin and target share one top-level type is exempt.
-- **Transport containment.** No class outside `adapter.bravehttp..` may reference the
-  bravehttp package or any JDK `java.net.http` type; transport types never leak inward or
-  sideways.
+- **Transport containment.** No class outside `adapter.bravehttp..`, `bootstrap..`, and
+  `api.internal..` may reference the bravehttp package, and no class outside
+  `adapter.bravehttp..` may reference any JDK `java.net.http` type; transport types never
+  leak inward or sideways.
 - **Process exit ownership.** Only `bootstrap.Main` calls `System.exit`. The `execute`
   method returns an exit code without terminating the JVM, so behavior is testable
   in-process.
@@ -118,9 +119,11 @@ There are exactly two places where concrete adapters are instantiated:
 - **`bootstrap.Main`** — the CLI process root. Builds the adapters, injects them into the
   picocli command tree, installs the process-wide INT and TERM signal handlers for live
   exchanges (see `docs/adr/0005-stream-cancellation.md`), and owns process exit: each
-  handler latches its cause on every live exchange and lets normal command flow decide the
-  exit code, while a signal arriving with no live exchange terminates the process itself
-  with that signal's conventional status, so no user signal is ever absorbed.
+  handler delegates its delivery decision to `UserSignals`, which latches its cause on every
+  live exchange and lets normal command flow decide the exit code on first delivery, while a
+  signal arriving with no live exchange — or the same signal repeated while the latched run
+  is still winding down — terminates the process itself with that signal's conventional
+  status, so no user signal is ever absorbed and no run outlasts a second request.
 - **`api.internal.Assembler`** — the library root. `assemble(...)` instantiates the
   concrete gateways over one shared transport and returns a plain wiring record of
   functions that the public `BraveSearchClient.Builder.build()` unpacks into the facade,
@@ -202,12 +205,14 @@ context the same way, and its transport observes the latch: a signal latched mid
 mid-body-read unblocks the blocking exchange and fails it as cancelled, so the run renders
 its failure document and exits by the signal instead of waiting out its budgets.
 `bootstrap.Main` installs exactly one INT and one
-TERM signal handler before the command line runs: each latches its cause on every live
-context, wait-free, and normal control flow finishes the run while `Main.main` exits with
-the cause-derived code (130 for SIGINT, 143 for SIGTERM; the first cause latched wins). A
-signal arriving while no context is live has nothing to latch, so its handler terminates the
-process itself with that signal's conventional status — the same 130 or 143 a latched run
-exits by — instead of absorbing the signal. This mechanism, and the
-disproof of the earlier shutdown-hook design on the native runtime, are recorded in
+TERM signal handler before the command line runs, backed by `UserSignals`: the first
+delivery latches its cause on every live context, wait-free, and normal control flow
+finishes the run while `Main.main` exits with the cause-derived code (130 for SIGINT, 143
+for SIGTERM; the first cause latched wins). A signal arriving while no context is live — or
+the same signal repeated while the run it latched is still winding down — terminates the
+process immediately with that signal's conventional status (130 or 143) instead of absorbing
+the signal or waiting out a stuck wind-down; a different signal arriving during that
+wind-down only latches, because the first cause decides the run's status. This mechanism,
+and the disproof of the earlier shutdown-hook design on the native runtime, are recorded in
 `docs/adr/0005-stream-cancellation.md`. No static mutable field anywhere holds cancellation or
 any other global state; there is no service locator.

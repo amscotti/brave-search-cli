@@ -40,18 +40,19 @@ public record ContextComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static ContextComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static ContextComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static ContextComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static ContextComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static ContextComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static ContextComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<ContextRequest, ContextResult> exchange =
                 RemoteExchanges.blocking(ContextEndpoint::assemble, ContextResult::new, environmentLookup);

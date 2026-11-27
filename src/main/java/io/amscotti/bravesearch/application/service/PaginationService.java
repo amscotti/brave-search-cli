@@ -250,10 +250,13 @@ public final class PaginationService<R extends PagedExchange> {
                                 requestedPages,
                                 FailureKind.RATE_LIMITED,
                                 "the rate-limit window resets in "
-                                        + outstanding.toSeconds() + "s, beyond this walk's maximum wait of "
-                                        + maximumPacingWait.toSeconds() + "s; retry after the reset");
+                                        + ceilingSeconds(outstanding)
+                                        + "s, beyond this walk's maximum wait of "
+                                        + maximumPacingWait.toSeconds()
+                                        + "s; retry after the reset",
+                                pages.getLast().result().rateLimits());
                     }
-                    if (!outstanding.isZero()) {
+                    if (outstanding.toMillis() > 0) {
                         pacing.waitingForReset(page, outstanding);
                     }
                     try {
@@ -319,12 +322,25 @@ public final class PaginationService<R extends PagedExchange> {
     /** The run stopped before {@code page}: its completed pages beside a fixed transport verdict. */
     private static <R extends PagedExchange> PagedRun<R> stopped(
             List<PagedSearch.Page<R>> pages, int requestedPages, String diagnostic) {
-        return stopped(pages, requestedPages, FailureKind.TRANSPORT, diagnostic);
+        return stopped(pages, requestedPages, FailureKind.TRANSPORT, diagnostic, null);
     }
 
-    /** The run stopped before {@code page}: its completed pages beside the given verdict. */
+    /** The run stopped before {@code page}: its completed pages beside the given verdict and snapshot. */
     private static <R extends PagedExchange> PagedRun<R> stopped(
-            List<PagedSearch.Page<R>> pages, int requestedPages, FailureKind kind, String diagnostic) {
-        return new PagedRun<>(requestedPages, pages, new Outcome.Failure<>(kind, diagnostic));
+            List<PagedSearch.Page<R>> pages,
+            int requestedPages,
+            FailureKind kind,
+            String diagnostic,
+            RateLimitSnapshot rateLimits) {
+        return new PagedRun<>(requestedPages, pages, new Outcome.Failure<>(kind, diagnostic, null, rateLimits, 0));
+    }
+
+    /** Whole seconds rounded up, so a fractional overflow never prints equal to the wait ceiling. */
+    private static long ceilingSeconds(Duration duration) {
+        long seconds = duration.getSeconds();
+        if (duration.getNano() > 0 && seconds < Long.MAX_VALUE) {
+            return seconds + 1;
+        }
+        return seconds;
     }
 }

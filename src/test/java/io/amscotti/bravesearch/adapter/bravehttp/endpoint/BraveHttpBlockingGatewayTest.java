@@ -21,8 +21,10 @@ import io.amscotti.bravesearch.domain.error.Outcome;
 import io.amscotti.bravesearch.domain.request.SuggestRequest;
 import io.amscotti.bravesearch.domain.result.SuggestSearchResult;
 import io.amscotti.bravesearch.testsupport.ScriptedSseServer;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -88,6 +90,53 @@ final class BraveHttpBlockingGatewayTest {
             assertNull(
                     recorded.firstHeader("Api-Version").orElse(null),
                     "an unpinned invocation sends no Api-Version header");
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void headerObservedUsageAndPinnedApiVersionTravelAcrossTheGateway() throws Exception {
+        String sentinel = "sentinel-" + UUID.randomUUID();
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .statusCode(200)
+                .header("Content-Type", "application/json")
+                .header("X-Request-ID", "req-usage-19")
+                .header("X-Request-Requests", "1")
+                .header("X-Request-Queries", "2")
+                .header("X-Request-Tokens-In", "900")
+                .header("X-Request-Tokens-Out", "120")
+                .header("X-Request-Total-Cost", "0.0042")
+                .writeBytes("{}".getBytes(UTF_8))
+                .start()) {
+
+            Outcome<SuggestSearchResult> outcome;
+            try (BraveHttpBlockingGateway<SuggestRequest, SuggestSearchResult> gateway =
+                    new BraveHttpBlockingGateway<>(
+                            transport(),
+                            loopbackOrigin(server),
+                            credential(sentinel),
+                            Duration.ofSeconds(10),
+                            "2026-08-30",
+                            SuggestEndpoint::assemble,
+                            SuggestSearchResult::new)) {
+                outcome = gateway.exchange(SuggestRequest.builder("artemis").build());
+            }
+
+            SuggestSearchResult result = valueOf(outcome);
+            assertEquals("req-usage-19", result.requestId());
+            assertEquals(1L, result.usage().requests());
+            assertEquals(2L, result.usage().queries());
+            assertEquals(900L, result.usage().tokensIn());
+            assertEquals(120L, result.usage().tokensOut());
+            assertEquals(0, new BigDecimal("0.0042").compareTo(result.usage().totalCost()));
+            assertEquals(
+                    Map.of("x-request-id", "req-usage-19"),
+                    result.usage().unknownFields(),
+                    "unknown X-Request-* headers ride usage verbatim");
+            assertEquals(
+                    "2026-08-30",
+                    server.requests().getFirst().firstHeader("Api-Version").orElseThrow(),
+                    "a pinned Api-Version reaches the wire verbatim");
         }
     }
 

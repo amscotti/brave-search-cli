@@ -42,18 +42,19 @@ public record SpellcheckComposition(
     }
 
     /** The process wiring: real environment lookup, real transport, per-invocation binding. */
-    public static SpellcheckComposition process(CredentialProvider storedCredentials) {
-        return process(storedCredentials, EnvironmentCredentialSource.processEnvironmentLookup());
+    public static SpellcheckComposition process() {
+        return process(EnvironmentCredentialSource.processEnvironmentLookup());
     }
 
     /** The shared wiring with machine codecs of its own, for a composition built standalone. */
-    static SpellcheckComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup) {
+    static SpellcheckComposition process(Function<String, String> environmentLookup) {
         JsonMappers mappers = new JsonMappers();
-        return process(storedCredentials, environmentLookup, mappers, new JsonlCodec(mappers));
+        return process(environmentLookup, mappers, new JsonlCodec(mappers));
     }
 
     /** The shared wiring behind the process factory, with the environment lookup and the machine codecs injected. */
-    static SpellcheckComposition process(CredentialProvider storedCredentials, Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
+    static SpellcheckComposition process(
+            Function<String, String> environmentLookup, JsonMappers mappers, JsonlCodec jsonl) {
         CredentialProvider loopbackTestToken = new LoopbackTestKeyCredentials(environmentLookup);
         RemoteExchange<SpellcheckRequest, SpellcheckSearchResult> exchange =
                 RemoteExchanges.blocking(SpellcheckEndpoint::assemble, SpellcheckSearchResult::new, environmentLookup);

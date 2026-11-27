@@ -32,6 +32,8 @@ import io.amscotti.bravesearch.application.stream.CancellationContext;
 import io.amscotti.bravesearch.bootstrap.ExchangeRegistry;
 import io.amscotti.bravesearch.domain.config.Credential;
 import io.amscotti.bravesearch.domain.error.Outcome;
+import io.amscotti.bravesearch.domain.metadata.RateLimitSnapshot;
+import io.amscotti.bravesearch.domain.metadata.RateLimitWindow;
 import io.amscotti.bravesearch.domain.metadata.UpstreamPayload;
 import io.amscotti.bravesearch.domain.request.PlaceEnrichmentRequest;
 import io.amscotti.bravesearch.domain.result.PlaceEnrichmentResult;
@@ -39,6 +41,8 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -288,6 +292,69 @@ final class PlacesEnrichmentCommandTest {
         }
     }
 
+    @Test
+    void aPacingWaitIsAnnouncedOnStderrForHumansAndVerboseRunsAndQuietSilencesIt() {
+        PaginationService.RateWaiter waiter = new PaginationService.RateWaiter() {
+
+            @Override
+            public Duration outstandingUntil(Instant resetAt) {
+                return Duration.ofMillis(1500);
+            }
+
+            @Override
+            public Duration await(Instant resetAt, CancellationContext cancellation) {
+                return Duration.ZERO;
+            }
+        };
+        String announcement = "places.details: waiting 1500 ms for the rate-limit window to reset before request 2\n";
+        String[] twentyFiveIds = IntStream.rangeClosed(1, 25).mapToObj(number -> "poi-" + number).toArray(String[]::new);
+        String[] quietArgs = prepend(twentyFiveIds, "--quiet");
+        String[] jsonlArgs = asJsonl(twentyFiveIds);
+        String[] verboseJsonlArgs = prepend(jsonlArgs, "--verbose");
+
+        Harness human = pacedHarness(waiter);
+        Harness quiet = pacedHarness(waiter);
+        Harness jsonl = pacedHarness(waiter);
+        Harness verboseJsonl = pacedHarness(waiter);
+
+        Harness.RunResult heard = human.runDetails(twentyFiveIds);
+        Harness.RunResult silent = quiet.runDetails(quietArgs);
+        Harness.RunResult machine = jsonl.runDetails(jsonlArgs);
+        Harness.RunResult verbose = verboseJsonl.runDetails(verboseJsonlArgs);
+
+        assertEquals(0, heard.exitCode(), () -> heard.describe());
+        assertEquals(2, human.exchange.dispatches.size());
+        assertEquals(announcement, heard.stderr(), "the human mode hears the wait before the second chunk");
+        assertEquals(0, silent.exitCode(), () -> silent.describe());
+        assertEquals("", silent.stderr(), "--quiet silences the announcement");
+        assertEquals(0, machine.exitCode(), () -> machine.describe());
+        assertEquals("", machine.stderr(), "a machine mode keeps stderr empty");
+        assertEquals(0, verbose.exitCode(), () -> verbose.describe());
+        assertEquals(announcement, verbose.stderr(), "--verbose carries the announcement into a machine mode");
+    }
+
+    private static Harness pacedHarness(PaginationService.RateWaiter waiter) {
+        Harness harness = new Harness();
+        harness.waiter = waiter;
+        harness.exchange.enqueue(new Outcome.Success<>(new PlaceEnrichmentResult(
+                200,
+                new UpstreamPayload("{\"results\":[]}".getBytes(UTF_8)),
+                new RateLimitSnapshot(
+                        List.of(new RateLimitWindow("request", 1, 0, Duration.ofSeconds(2))), List.of(), Instant.EPOCH),
+                null,
+                null,
+                null)));
+        harness.exchange.enqueue(chunkOutcome(200, "{\"results\":[]}"));
+        return harness;
+    }
+
+    private static String[] prepend(String[] arguments, String... leading) {
+        String[] combined = new String[leading.length + arguments.length];
+        System.arraycopy(leading, 0, combined, 0, leading.length);
+        System.arraycopy(arguments, 0, combined, leading.length, arguments.length);
+        return combined;
+    }
+
     private static void enqueueSilentChunks(Harness harness, int chunks) {
         for (int chunk = 1; chunk <= chunks; chunk++) {
             harness.exchange.enqueue(chunkOutcome(200, "{}"));
@@ -390,6 +457,8 @@ final class PlacesEnrichmentCommandTest {
         io.amscotti.bravesearch.application.stream.CancellationRegistry cancellations = new ExchangeRegistry();
         /** The result writer of a run; a test replaces it to fail a write mid-walk. */
         ResultWriter writer = new OutputStreamResultWriter(stdoutBytes);
+        /** The walk's pacing waiter; a test replaces it to stage deterministic waits. */
+        PaginationService.RateWaiter waiter = new SlicedRateWaiter(Clock.systemUTC());
 
         Harness() {
             stored.credential = credential("stored-production-token");
@@ -420,7 +489,7 @@ final class PlacesEnrichmentCommandTest {
                     (mode, diagnostics, results, quiet) ->
                             new ModeAwareWarnings(mode, PlaceDescribePresenter.COMMAND, diagnostics, results, jsonl, quiet));
             PaginationService<PlaceEnrichmentResult> pagination = new PaginationService<>(
-                    PaginationService.ContinuationProbe.alwaysContinue(), new SlicedRateWaiter(Clock.systemUTC()));
+                    PaginationService.ContinuationProbe.alwaysContinue(), waiter);
             PlacesDetailsCommand details = new PlacesDetailsCommand(
                     globals,
                     new RemoteOptions(STUB_LOCALHOST),

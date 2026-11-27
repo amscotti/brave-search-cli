@@ -87,10 +87,11 @@ signature, so it stays package-private behind the builder.
   a literal loopback origin (http(s) on exactly `127.0.0.1`, `[::1]`, or `localhost`, with
   an optional port, no user information, no query, no fragment, and an empty or slash
   path). The default is the production origin `https://api.search.brave.com/res/v1`. The
-  origin's own routing rule can never move the supplied credential off the production
-  origin, so an override can never exfiltrate credential material. The library ships no
-  proxy configuration: connections go directly to the origin, and the loopback-only
-  override is not a proxy seam.
+  override changes where requests travel, not which credential they carry: the caller's
+  own token supplier feeds both the production origin and the loopback override alike, so
+  the caller alone decides what its supplier hands to either peer. The library ships no
+  proxy configuration: connections go directly to the origin (ignoring JVM default proxy
+  selectors), and the loopback-only override is not a proxy seam.
 
 Streaming budgets ride the request itself (`AnswersRequest.idleTimeout` /
 `streamTimeout`); when a streaming request pins none, the exchange's documented defaults
@@ -280,9 +281,10 @@ the machine surfaces. The public API is exactly:
 - everything in `io.amscotti.bravesearch.api` except `api.internal..`;
 - the domain types the public `api` package reaches, directly or transitively — exactly the
   set `PublicApiSurfaceTest` pins: the request records with their builders, the
-  completed-exchange result records with `PagedExchange`, the metadata records, the error
-  vocabulary (`Outcome`, `FailureKind`, `ClassifiedFailure`, `UpstreamError`,
-  `UsageValidationError`), `Credential` with `InvalidCredentialException`, and `Goggle`;
+  completed-exchange result records with `PagedExchange`, `AnswerStreamEvent`, the metadata
+  records, the error vocabulary (`Outcome`, `FailureKind`, `ClassifiedFailure`,
+  `UpstreamError`, `UsageValidationError`), `Credential` with `InvalidCredentialException`,
+  and `Goggle`;
 - the exported application types named in the exported-types list below, as they appear
   in the public signatures;
 - `tools.jackson.databind.JsonNode` and `tools.jackson.core.JacksonException` as they

@@ -23,7 +23,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -276,6 +279,101 @@ final class BraveSearchClientWiringTest {
                 new Throwable[] {second},
                 reported.getSuppressed(),
                 "the second refusal is kept with the first instead of vanishing");
+    }
+
+    @Test
+    @Timeout(value = 30, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void closeEndsAnInFlightAnswersStreamOpenAtOnceInsteadOfWaitingOutTheHeadersTimeout() throws Exception {
+        CountDownLatch neverSendHeaders = new CountDownLatch(1);
+        Credential token = token();
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                        .holdHeadersUntil(neverSendHeaders)
+                        .header("Content-Type", "text/event-stream")
+                        .writeBytes("data: [DONE]\n\n".getBytes(UTF_8))
+                        .start();
+                BraveSearchClient client = client(() -> token, server.baseUrl().toString())) {
+            AtomicReference<Outcome<AnswersStreamHandle>> outcome = new AtomicReference<>();
+            Thread opening = new Thread(() -> outcome.set(client.answersStream(streaming())));
+            opening.start();
+            assertTrue(server.awaitFirstRequest(AWAIT), "the stream open must reach the origin before close");
+
+            long startedAt = System.nanoTime();
+            client.close();
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+            opening.join(AWAIT.toMillis());
+
+            assertFalse(opening.isAlive(), "close must end an in-flight stream open promptly");
+            assertTrue(elapsedMs < 4000, "close returns at once instead of waiting out the headers timeout: " + elapsedMs + " ms");
+            Outcome.Failure<AnswersStreamHandle> ended = (Outcome.Failure<AnswersStreamHandle>) outcome.get();
+            assertEquals(FailureKind.TRANSPORT, ended.kind());
+            assertEquals("upstream stream exchange cancelled", ended.diagnostic());
+        } finally {
+            neverSendHeaders.countDown();
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void aCallerSuppliedExecutorCarriesStreamingOpensAndSurvivesClose() throws Exception {
+        AtomicBoolean ranOnCallerExecutor = new AtomicBoolean();
+        ExecutorService callerOwned = Executors.newCachedThreadPool(task -> {
+            ranOnCallerExecutor.set(true);
+            Thread thread = new Thread(task, "caller-stream-worker");
+            thread.setDaemon(true);
+            return thread;
+        });
+        Credential token = token();
+        try (ScriptedSseServer server = ScriptedSseServer.builder()
+                .statusCode(200)
+                .header("Content-Type", "text/event-stream")
+                .writeBytes("data: [DONE]\n\n".getBytes(UTF_8))
+                .start()) {
+            try (BraveSearchClient client = BraveSearchClient.builder()
+                    .tokenSupplier(() -> token)
+                    .baseUrl(server.baseUrl().toString())
+                    .executor(callerOwned)
+                    .build()) {
+                Outcome<AnswersStreamHandle> opened = client.answersStream(streaming());
+                assertTrue(opened instanceof Outcome.Success<AnswersStreamHandle>, "stream opens cleanly");
+                ((Outcome.Success<AnswersStreamHandle>) opened).value().close();
+            }
+            assertTrue(ranOnCallerExecutor.get(), "the streaming open rides the caller-supplied executor");
+            assertFalse(callerOwned.isShutdown(), "client.close() never shuts down a caller-supplied executor");
+        } finally {
+            callerOwned.shutdownNow();
+        }
+    }
+
+    @Test
+    void whileOpenRacingCloseMapsTransportClosedInternalFailureToClosedClientTransportFailure() {
+        AtomicReference<BraveSearchClient> holder = new AtomicReference<>();
+        BraveSearchClient client = new BraveSearchClient(
+                request -> {
+                    holder.get().close();
+                    return new Outcome.Failure<>(FailureKind.INTERNAL, "the HTTP client has been closed");
+                },
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                unused(),
+                payload -> {
+                    throw new AssertionError("no body is read");
+                },
+                List.of());
+        holder.set(client);
+
+        Outcome.Failure<WebSearchResponse> outcome =
+                (Outcome.Failure<WebSearchResponse>) client.webSearch(WebSearchRequest.builder("q").build());
+
+        assertEquals(FailureKind.TRANSPORT, outcome.kind());
+        assertEquals("the client is closed", outcome.diagnostic());
     }
 
     /** A client over the given stream opener and owned resources; every other endpoint is an unused stub. */

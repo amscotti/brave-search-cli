@@ -39,7 +39,7 @@ public record HttpProxy(String host, int port, List<String> bypass) {
     /** Whether an exchange to {@code targetHost} travels through this proxy. */
     public boolean proxies(String targetHost) {
         Objects.requireNonNull(targetHost, "targetHost");
-        String target = targetHost.toLowerCase(Locale.ROOT);
+        String target = normalizeHost(targetHost);
         if (isLoopback(target)) {
             return false;
         }
@@ -51,11 +51,35 @@ public record HttpProxy(String host, int port, List<String> bypass) {
         return true;
     }
 
+    private static String normalizeHost(String raw) {
+        String host = raw.toLowerCase(Locale.ROOT);
+        if (host.startsWith("[") && host.endsWith("]") && host.length() >= 2) {
+            host = host.substring(1, host.length() - 1);
+        }
+        if (host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        return host;
+    }
+
     private static boolean matches(String entry, String target) {
         String rule = entry.toLowerCase(Locale.ROOT);
-        int portSeparator = rule.indexOf(':');
-        if (portSeparator >= 0 && !rule.startsWith("[")) {
-            rule = rule.substring(0, portSeparator);
+        if (rule.startsWith("[")) {
+            int closeBracket = rule.indexOf(']');
+            if (closeBracket < 0) {
+                return false;
+            }
+            if (closeBracket == rule.length() - 1 || rule.charAt(closeBracket + 1) == ':') {
+                rule = rule.substring(1, closeBracket);
+            } else {
+                return false;
+            }
+        } else {
+            int firstColon = rule.indexOf(':');
+            if (firstColon >= 0 && firstColon == rule.lastIndexOf(':')) {
+                // a single colon separates host and port; multiple colons denote an unbracketed IPv6 literal
+                rule = rule.substring(0, firstColon);
+            }
         }
         if (rule.equals("*")) {
             return true;
@@ -63,10 +87,51 @@ public record HttpProxy(String host, int port, List<String> bypass) {
         if (rule.startsWith(".")) {
             rule = rule.substring(1);
         }
-        return !rule.isEmpty() && (target.equals(rule) || target.endsWith("." + rule));
+        if (rule.endsWith(".")) {
+            rule = rule.substring(0, rule.length() - 1);
+        }
+        if (rule.isEmpty()) {
+            return false;
+        }
+        if (rule.indexOf(':') >= 0) {
+            return target.equals(rule);
+        }
+        return target.equals(rule) || target.endsWith("." + rule);
     }
 
     private static boolean isLoopback(String host) {
-        return host.equals("localhost") || host.startsWith("127.") || host.equals("::1") || host.equals("[::1]");
+        return host.equals("localhost") || isIpv4Loopback(host) || host.equals("::1");
+    }
+
+    /** True when {@code host} is a dotted-quad IPv4 address literal inside {@code 127.0.0.0/8}. */
+    private static boolean isIpv4Loopback(String host) {
+        if (!host.startsWith("127.")) {
+            return false;
+        }
+        String[] octets = host.split("\\.", -1);
+        if (octets.length != 4) {
+            return false;
+        }
+        for (int index = 1; index < 4; index++) {
+            if (!isIpv4Octet(octets[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isIpv4Octet(String segment) {
+        if (segment.isEmpty() || segment.length() > 3) {
+            return false;
+        }
+        int value = 0;
+        for (int i = 0; i < segment.length(); i++) {
+            char c = segment.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return value <= 255;
     }
 }

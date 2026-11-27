@@ -32,28 +32,20 @@ import java.util.function.Function;
 final class RemoteExchanges {
 
     /**
-     * Opens the transport of one run scope: its connection budget, its total budget, the
-     * cancellation latch the exchange joins, and the proxy its exchanges travel through. A
-     * seam, so a test can observe how many transports a run opens.
+     * Opens the transport of one run scope: its connection budget, its total budget, and the
+     * cancellation latch the exchange joins. A seam, so a test can observe how many transports
+     * a run opens.
      */
     @FunctionalInterface
     interface TransportOpener {
 
-        BraveHttpTransport open(
-                Duration connectTimeout,
-                Duration totalTimeout,
-                CancellationContext cancellation,
-                Optional<HttpProxy> proxy);
+        BraveHttpTransport open(Duration connectTimeout, Duration totalTimeout, CancellationContext cancellation);
     }
 
     /** The opener of a composition with no proxy: a fresh client per transport over a direct connection. */
     static final TransportOpener DIRECT_TRANSPORTS =
-            (connectTimeout, totalTimeout, cancellation, proxy) -> new BraveHttpTransport(
-                    new BraveHttpClientFactory(connectTimeout).newClient(proxy),
-                    totalTimeout,
-                    ResponseLimits.production(),
-                    Clock.systemUTC(),
-                    cancellation);
+            (connectTimeout, totalTimeout, cancellation) ->
+                    openTransport(connectTimeout, totalTimeout, cancellation, Optional.empty());
 
     private RemoteExchanges() {}
 
@@ -69,8 +61,21 @@ final class RemoteExchanges {
         return blocking(
                 assembly,
                 projection,
-                (connectTimeout, totalTimeout, cancellation, ignored) -> DIRECT_TRANSPORTS.open(
+                (connectTimeout, totalTimeout, cancellation) -> openTransport(
                         connectTimeout, totalTimeout, cancellation, ProxyEnvironment.httpsProxy(environmentLookup)));
+    }
+
+    private static BraveHttpTransport openTransport(
+            Duration connectTimeout,
+            Duration totalTimeout,
+            CancellationContext cancellation,
+            Optional<HttpProxy> proxy) {
+        return new BraveHttpTransport(
+                new BraveHttpClientFactory(connectTimeout).newClient(proxy),
+                totalTimeout,
+                ResponseLimits.production(),
+                Clock.systemUTC(),
+                cancellation);
     }
 
     /** The same exchange over an injected transport opener. */
@@ -91,16 +96,26 @@ final class RemoteExchanges {
             @Override
             public RemoteWalk<Req, Res> openWalk(RemoteDispatch<Req> scope) {
                 Objects.requireNonNull(scope, "scope");
-                BraveHttpTransport transport = transports.open(
-                        scope.connectTimeout(), scope.totalTimeout(), scope.cancellation(), Optional.empty());
-                BraveHttpBlockingGateway<Req, Res> gateway = new BraveHttpBlockingGateway<>(
-                        transport,
-                        scope.origin(),
-                        scope.credential(),
-                        scope.totalTimeout(),
-                        scope.pinnedApiVersion(),
-                        assembly,
-                        projection);
+                BraveHttpTransport transport =
+                        transports.open(scope.connectTimeout(), scope.totalTimeout(), scope.cancellation());
+                BraveHttpBlockingGateway<Req, Res> gateway;
+                try {
+                    gateway = new BraveHttpBlockingGateway<>(
+                            transport,
+                            scope.origin(),
+                            scope.credential(),
+                            scope.totalTimeout(),
+                            scope.pinnedApiVersion(),
+                            assembly,
+                            projection);
+                } catch (RuntimeException failure) {
+                    try {
+                        transport.close();
+                    } catch (RuntimeException closeFailure) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                    throw failure;
+                }
                 return new RemoteWalk<>() {
 
                     @Override

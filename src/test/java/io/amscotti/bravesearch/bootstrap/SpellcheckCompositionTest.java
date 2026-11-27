@@ -42,7 +42,7 @@ final class SpellcheckCompositionTest {
             return null;
         };
         ExchangeRegistry exchanges = new ExchangeRegistry();
-        SpellcheckComposition process = SpellcheckComposition.process(storedCredentials(), environment);
+        SpellcheckComposition process = SpellcheckComposition.process(environment);
 
         RunResult result = runMain(exchanges, environment, process, "spellcheck", "--base-url", "http://127.0.0.1:1", "q");
 
@@ -83,7 +83,11 @@ final class SpellcheckCompositionTest {
         System.setOut(new PrintStream(stdout, true, UTF_8));
         System.setErr(new PrintStream(stderr, true, UTF_8));
         try {
-            int exitCode = new Main(exchanges, config, Compositions.process(storedCredentials(), environment, exchanges).withSpellcheckSearch(spellcheckSearch))
+            int exitCode = new Main(
+                            exchanges,
+                            config,
+                            Compositions.process(environment, exchanges).withSpellcheckSearch(spellcheckSearch),
+                            environment)
                     .execute(args);
             return new RunResult(exitCode, stdout.toString(UTF_8), stderr.toString(UTF_8));
         } finally {

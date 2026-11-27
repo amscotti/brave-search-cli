@@ -190,7 +190,7 @@ public abstract class RemoteCommandSupport<TReq, TRes> implements Callable<Integ
             String requestNoun, String command, OutputRequest output, DiagnosticsSink diagnostics) {
         boolean heard = output.mode() == OutputMode.HUMAN || output.verbose();
         return (request, outstanding) -> {
-            if (heard && !output.quiet()) {
+            if (heard && !output.quiet() && outstanding.toMillis() > 0) {
                 diagnostics.emit(command + ": waiting " + renderWait(outstanding)
                         + " for the rate-limit window to reset before " + requestNoun + " " + request);
             }
